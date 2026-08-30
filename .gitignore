@@ -1,0 +1,6 @@
+*.bak
+.playwright-cli/
+dev/cartao-*.md
+.pares/
+dev/submissao-marketplace.md
+dev/analise-*.md

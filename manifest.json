@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "cinco.5bars",
+  "name": "5bars",
+  "version": "1.0.0",
+  "author": "Cinco Euzebio",
+  "description": "Per-screen bar layouts. Every monitor renders the default bar until you give it one of its own, with its own left, center and right.",
+  "kinds": [
+    "bar",
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "bar": "Bar.qml",
+    "barWidget": "Studio.qml"
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.bar"
+  },
+  "license": "MIT",
+  "barWidget": {
+    "displayName": "5bars",
+    "description": "Give each monitor its own left, center and right.",
+    "category": "Desktop",
+    "aliases": [
+      "5bars",
+      "5bar",
+      "multibar",
+      "screens",
+      "per-screen"
+    ],
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}

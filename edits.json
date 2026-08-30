@@ -1,0 +1,194 @@
+[
+  {
+    "label": "per-screen state",
+    "count": 1,
+    "old": "  // The tray drawer reveals inward (away from the bar edge). Place it at the",
+    "new": "  // ── Per-screen layout profiles ─────────────────────────────────────────\n  // `barConfig.layout` is the default profile: every output renders it unless\n  // it owns an entry under `barConfig.screens`. A screen profile carries the\n  // same shape as the bar subtree itself -- a `layout` plus an optional\n  // `centerAnchor` -- so a second screen is a bar config in miniature rather\n  // than a second, divergent schema to learn.\n  //\n  // An output with no entry is not the same as an output with an empty one.\n  // The first inherits; the second is deliberately blank. Keeping those\n  // distinct is what lets \"give this monitor its own bar\" be an explicit and\n  // reversible act instead of a side effect of having touched the screen.\n  property var screenLayouts: ({})\n  property var screenAnchors: ({})\n\n  function hasScreenProfile(screenName) {\n    var key = String(screenName || \"\")\n    return key !== \"\" && screenLayouts[key] !== undefined\n  }\n\n  function layoutFor(screenName) {\n    var key = String(screenName || \"\")\n    var own = key !== \"\" ? screenLayouts[key] : undefined\n    return own !== undefined ? own : layoutConfig\n  }\n\n  function centerAnchorFor(screenName) {\n    var key = String(screenName || \"\")\n    var own = key !== \"\" ? screenAnchors[key] : undefined\n    return own !== undefined && own !== null ? own : centerAnchor\n  }\n\n  function normalizeScreenLayouts(screens) {\n    var out = ({})\n    if (!Util.isPlainObject(screens)) return out\n    for (var name in screens) {\n      var profile = screens[name]\n      if (!Util.isPlainObject(profile)) continue\n      out[String(name)] = normalizeLayout(profile.layout)\n    }\n    return out\n  }\n\n  function normalizeScreenAnchors(screens) {\n    var out = ({})\n    if (!Util.isPlainObject(screens)) return out\n    for (var name in screens) {\n      var profile = screens[name]\n      if (!Util.isPlainObject(profile)) continue\n      if (profile.centerAnchor === undefined || profile.centerAnchor === null) continue\n      out[String(name)] = Util.canonicalWidgetId(String(profile.centerAnchor || \"\"))\n    }\n    return out\n  }\n\n  // The tray drawer reveals inward (away from the bar edge). Place it at the"
+  },
+  {
+    "label": "layoutEntries(region, screenName)",
+    "count": 1,
+    "old": "  function layoutEntries(region) {\n    var serial = barConfigSerial\n    var entries = layoutConfig ? layoutConfig[region] : null\n    return Array.isArray(entries) ? entries : []\n  }",
+    "new": "  function layoutEntries(region, screenName) {\n    var serial = barConfigSerial\n    var layout = layoutFor(screenName)\n    var entries = layout ? layout[region] : null\n    return Array.isArray(entries) ? entries : []\n  }"
+  },
+  {
+    "label": "panelNavigationSlots per screen",
+    "count": 1,
+    "old": "  function panelNavigationSlots(region, window) {\n    var entries = layoutEntries(region)",
+    "new": "  function panelNavigationSlots(region, window) {\n    var entries = layoutEntries(region, window && window.screen ? String(window.screen.name || \"\") : \"\")"
+  },
+  {
+    "label": "applyBarConfig screen profiles",
+    "count": 1,
+    "old": "    var next = normalizeLayout(config.layout)\n    var delta = BarModel.inlineSettingsDelta(layoutConfig, next)\n    if (delta) {\n      applySettingsDelta(delta)\n      return\n    }\n    layoutConfig = next\n    barConfigSerial++",
+    "new": "    var next = normalizeLayout(config.layout)\n    var nextScreens = normalizeScreenLayouts(config.screens)\n    var nextAnchors = normalizeScreenAnchors(config.screens)\n\n    // The in-place fast path only holds while the screen profiles are\n    // untouched. A settings-only delta is pushed into live widgets by region\n    // and index, and those coordinates mean nothing the moment one output\n    // starts rendering a different list from another.\n    var screensUnchanged = JSON.stringify(screenLayouts) === JSON.stringify(nextScreens)\n      && JSON.stringify(screenAnchors) === JSON.stringify(nextAnchors)\n    var delta = screensUnchanged ? BarModel.inlineSettingsDelta(layoutConfig, next) : null\n    if (delta) {\n      applySettingsDelta(delta)\n      return\n    }\n    layoutConfig = next\n    screenLayouts = nextScreens\n    screenAnchors = nextAnchors\n    barConfigSerial++"
+  },
+  {
+    "label": "rawLayoutSection per screen",
+    "count": 1,
+    "old": "  function rawLayoutSection(config, region) {\n    if (!Util.isPlainObject(config.bar)) config.bar = {}\n    if (!Util.isPlainObject(config.bar.layout)) config.bar.layout = {}\n    if (!Array.isArray(config.bar.layout[region])) config.bar.layout[region] = []\n\n    return config.bar.layout[region]\n  }",
+    "new": "  function rawLayoutSection(config, region, screenName) {\n    if (!Util.isPlainObject(config.bar)) config.bar = {}\n\n    // Only a screen that already owns a profile is written to. Dragging a\n    // widget on an inheriting output edits the default profile, which is what\n    // the user sees happening -- that bar is showing the default. Creating a\n    // profile is the panel's job, and stays a deliberate act.\n    var key = String(screenName || \"\")\n    if (key !== \"\" && Util.isPlainObject(config.bar.screens) && Util.isPlainObject(config.bar.screens[key])) {\n      var profile = config.bar.screens[key]\n      if (!Util.isPlainObject(profile.layout)) profile.layout = {}\n      if (!Array.isArray(profile.layout[region])) profile.layout[region] = []\n      return profile.layout[region]\n    }\n\n    if (!Util.isPlainObject(config.bar.layout)) config.bar.layout = {}\n    if (!Array.isArray(config.bar.layout[region])) config.bar.layout[region] = []\n\n    return config.bar.layout[region]\n  }"
+  },
+  {
+    "label": "moveModuleInConfig per screen",
+    "count": 1,
+    "old": "  function moveModuleInConfig(config, fromRegion, fromName, toRegion, beforeName) {\n    var fromEntries = rawLayoutSection(config, fromRegion)\n    var toEntries = rawLayoutSection(config, toRegion)",
+    "new": "  function moveModuleInConfig(config, fromRegion, fromName, toRegion, beforeName, screenName) {\n    var fromEntries = rawLayoutSection(config, fromRegion, screenName)\n    var toEntries = rawLayoutSection(config, toRegion, screenName)"
+  },
+  {
+    "label": "dropBarModule per screen",
+    "count": 1,
+    "old": "      changed = moveModuleInConfig(config, source.region, source.moduleName, toRegion, beforeName)",
+    "new": "      changed = moveModuleInConfig(config, source.region, source.moduleName, toRegion, beforeName, source.screenName)"
+  },
+  {
+    "label": "nextVisibleModuleName per screen",
+    "count": 1,
+    "old": "  function nextVisibleModuleName(region, afterName, sourceSlot) {\n    var entries = layoutEntries(region)",
+    "new": "  function nextVisibleModuleName(region, afterName, sourceSlot) {\n    var entries = layoutEntries(region, sourceSlot ? sourceSlot.screenName : \"\")"
+  },
+  {
+    "label": "BarPanel.screenName",
+    "count": 1,
+    "old": "  component BarPanel: PanelWindow {\n    id: barWindow\n",
+    "new": "  component BarPanel: PanelWindow {\n    id: barWindow\n\n    // The output this surface is drawn on, and the only thing the sections\n    // below need in order to render a layout of their own.\n    readonly property string screenName: barWindow.screen ? String(barWindow.screen.name || \"\") : \"\"\n"
+  },
+  {
+    "label": "horizontalBar sections",
+    "count": 1,
+    "old": "        CenterModules { anchors.fill: parent }\n\n        LeftModules {\n          anchors.left: parent.left\n          anchors.leftMargin: Style.space(8)\n          anchors.verticalCenter: parent.verticalCenter\n        }\n\n        RightModules {\n          anchors.right: parent.right\n          anchors.rightMargin: Style.space(8)\n          anchors.verticalCenter: parent.verticalCenter\n        }",
+    "new": "        CenterModules { anchors.fill: parent; screenName: barWindow.screenName }\n\n        LeftModules {\n          screenName: barWindow.screenName\n          anchors.left: parent.left\n          anchors.leftMargin: Style.space(8)\n          anchors.verticalCenter: parent.verticalCenter\n        }\n\n        RightModules {\n          screenName: barWindow.screenName\n          anchors.right: parent.right\n          anchors.rightMargin: Style.space(8)\n          anchors.verticalCenter: parent.verticalCenter\n        }"
+  },
+  {
+    "label": "verticalBar left/center",
+    "count": 1,
+    "old": "        CenterModules { anchors.fill: parent }\n\n        LeftModules {\n          anchors.top: parent.top\n          anchors.topMargin: Style.space(8)\n          anchors.horizontalCenter: parent.horizontalCenter\n        }",
+    "new": "        CenterModules { anchors.fill: parent; screenName: barWindow.screenName }\n\n        LeftModules {\n          screenName: barWindow.screenName\n          anchors.top: parent.top\n          anchors.topMargin: Style.space(8)\n          anchors.horizontalCenter: parent.horizontalCenter\n        }"
+  },
+  {
+    "label": "verticalBar right",
+    "count": 1,
+    "old": "        RightModules {\n          anchors.bottom: parent.bottom",
+    "new": "        RightModules {\n          screenName: barWindow.screenName\n          anchors.bottom: parent.bottom"
+  },
+  {
+    "label": "section components per screen",
+    "count": 1,
+    "old": "  function findCenterAnchorEntry() {\n    var entries = root.layoutEntries(\"center\")\n    var idx = root.entryIndex(entries, root.centerAnchor)\n    return idx === -1 ? null : entries[idx]\n  }\n\n  component LeftModules: ModuleList {\n    entries: root.layoutEntries(\"left\")\n    region: \"left\"\n  }\n\n  component RightModules: ModuleList {\n    entries: root.layoutEntries(\"right\")\n    region: \"right\"\n  }\n\n  component CenterModules: Item {\n    id: centerRoot\n\n    property var entries: root.layoutEntries(\"center\")\n    readonly property bool hasAnchor: root.entryIndex(entries, root.centerAnchor) !== -1\n    readonly property var anchorEntry: root.findCenterAnchorEntry()",
+    "new": "  function findCenterAnchorEntry(screenName) {\n    var entries = root.layoutEntries(\"center\", screenName)\n    var idx = root.entryIndex(entries, root.centerAnchorFor(screenName))\n    return idx === -1 ? null : entries[idx]\n  }\n\n  component LeftModules: ModuleList {\n    entries: root.layoutEntries(\"left\", screenName)\n    region: \"left\"\n  }\n\n  component RightModules: ModuleList {\n    entries: root.layoutEntries(\"right\", screenName)\n    region: \"right\"\n  }\n\n  component CenterModules: Item {\n    id: centerRoot\n\n    property string screenName: \"\"\n    property var entries: root.layoutEntries(\"center\", screenName)\n    readonly property string anchorId: root.centerAnchorFor(screenName)\n    readonly property bool hasAnchor: root.entryIndex(entries, anchorId) !== -1\n    readonly property var anchorEntry: root.findCenterAnchorEntry(screenName)"
+  },
+  {
+    "label": "center unanchored list",
+    "count": 2,
+    "old": "          visible: !centerRoot.hasAnchor\n          entries: centerRoot.entries\n          region: \"center\"\n          anchors.centerIn: parent",
+    "new": "          visible: !centerRoot.hasAnchor\n          entries: centerRoot.entries\n          region: \"center\"\n          screenName: centerRoot.screenName\n          anchors.centerIn: parent"
+  },
+  {
+    "label": "center before-anchor list",
+    "count": 2,
+    "old": "          entries: root.entriesBefore(centerRoot.entries, root.centerAnchor)\n          region: \"center\"",
+    "new": "          entries: root.entriesBefore(centerRoot.entries, centerRoot.anchorId)\n          region: \"center\"\n          screenName: centerRoot.screenName"
+  },
+  {
+    "label": "center after-anchor list",
+    "count": 2,
+    "old": "          entries: root.entriesAfter(centerRoot.entries, root.centerAnchor)\n          region: \"center\"",
+    "new": "          entries: root.entriesAfter(centerRoot.entries, centerRoot.anchorId)\n          region: \"center\"\n          screenName: centerRoot.screenName"
+  },
+  {
+    "label": "center anchor slot",
+    "count": 2,
+    "old": "          id: centerAnchorModule\n          visible: centerRoot.hasAnchor\n          entry: centerRoot.anchorEntry\n          region: \"center\"",
+    "new": "          id: centerAnchorModule\n          visible: centerRoot.hasAnchor\n          entry: centerRoot.anchorEntry\n          region: \"center\"\n          screenName: centerRoot.screenName"
+  },
+  {
+    "label": "ModuleList.screenName",
+    "count": 1,
+    "old": "  component ModuleList: Loader {\n    id: moduleListRoot\n\n    property var entries: []\n    property string region: \"\"\n",
+    "new": "  component ModuleList: Loader {\n    id: moduleListRoot\n\n    property var entries: []\n    property string region: \"\"\n    property string screenName: \"\"\n"
+  },
+  {
+    "label": "ModuleSlot screen wiring",
+    "count": 2,
+    "old": "          ModuleSlot {\n            required property var modelData\n            entry: modelData\n            region: moduleListRoot.region\n          }",
+    "new": "          ModuleSlot {\n            required property var modelData\n            entry: modelData\n            region: moduleListRoot.region\n            screenName: moduleListRoot.screenName\n          }"
+  },
+  {
+    "label": "ModuleSlot.screenName",
+    "count": 1,
+    "old": "  component ModuleSlot: Item {\n    id: slot\n\n    required property var entry\n    property string region: \"\"\n",
+    "new": "  component ModuleSlot: Item {\n    id: slot\n\n    required property var entry\n    property string region: \"\"\n    // Which output this instance is drawn on. A layout entry is mounted once\n    // per bar surface, so this is what tells two copies of the same widget id\n    // apart -- and what routes a drag back to the profile it came from.\n    property string screenName: \"\"\n"
+  },
+  {
+    "label": "omarchyPath/barWidgetRegistry not required",
+    "count": 1,
+    "old": "  // The omarchy-shell host injects omarchyPath from OMARCHY_PATH.\n  required property string omarchyPath\n  // Injected by the host shell so bar slots can resolve enabled widgets.\n  required property var barWidgetRegistry",
+    "new": "  // The omarchy-shell host injects omarchyPath from OMARCHY_PATH.\n  property string omarchyPath: \"\"\n  // Injected by the host shell so bar slots can resolve enabled widgets.\n  property var barWidgetRegistry: null"
+  },
+  {
+    "label": "barConfig not required",
+    "count": 1,
+    "old": "  required property var barConfig",
+    "new": "  property var barConfig: null"
+  },
+  {
+    "label": "registry null-guard",
+    "count": 1,
+    "old": "      var w = root.barWidgetRegistry.widgets",
+    "new": "      var w = root.barWidgetRegistry ? root.barWidgetRegistry.widgets : ({})"
+  },
+  {
+    "label": "no redundant screen reassign",
+    "count": 1,
+    "old": "    layoutConfig = next\n    screenLayouts = nextScreens\n    screenAnchors = nextAnchors\n    barConfigSerial++",
+    "new": "    layoutConfig = next\n    if (!screensUnchanged) {\n      screenLayouts = nextScreens\n      screenAnchors = nextAnchors\n    }\n    barConfigSerial++"
+  },
+  {
+    "label": "injectProps teardown guard",
+    "count": 1,
+    "old": "    function injectProps() {\n      var target = activeItem\n      if (!target) return\n      if (\"bar\" in target) target.bar = root",
+    "new": "    function injectProps() {\n      var host = root\n      var target = activeItem\n      if (!host || !target) return\n      if (\"bar\" in target) target.bar = host"
+  },
+  {
+    "label": "per-screen transparency and off state",
+    "count": 1,
+    "old": "  function centerAnchorFor(screenName) {",
+    "new": "  // Transparency is deliberately NOT per screen. The colour a transparent bar\n  // draws with is sampled from the wallpaper, and every widget takes it from\n  // the shared `bar.barForeground`, so two screens cannot disagree about\n  // transparency and both stay readable -- whichever way the one foreground\n  // is resolved, it is wrong for one of them. Fixing that needs the same\n  // per-surface facade that keeps `position` global.\n  property var screenDisabled: ({})\n\n  // Screens whose bar is switched off are dropped from the model rather than\n  // parked off-screen the way the global bar-off toggle does it. That toggle\n  // is a hotkey and has to be cheap to reverse; this is a config decision, and\n  // destroying the surface is what actually gives the exclusion zone back so\n  // windows can use the full height of that screen.\n  readonly property var enabledScreens: {\n    var serial = barConfigSerial\n    var disabled = screenDisabled\n    var all = Quickshell.screens\n    var out = []\n    for (var i = 0; i < all.length; i++) {\n      if (disabled[String(all[i].name || \"\")] === true) continue\n      out.push(all[i])\n    }\n    return out\n  }\n\n  function centerAnchorFor(screenName) {"
+  },
+  {
+    "label": "normalize transparency and off flags",
+    "count": 1,
+    "old": "    var nextScreens = normalizeScreenLayouts(config.screens)\n    var nextAnchors = normalizeScreenAnchors(config.screens)",
+    "new": "    var nextScreens = normalizeScreenLayouts(config.screens)\n    var nextAnchors = normalizeScreenAnchors(config.screens)\n    // Stored as `enabled: false`, read as \"disabled\", so that a profile which\n    // says nothing about it is on -- the same inherit-by-omission rule the\n    // layout follows.\n    var nextDisabled = ({})\n    if (Util.isPlainObject(config.screens)) {\n      for (var name in config.screens) {\n        var profile = config.screens[name]\n        if (Util.isPlainObject(profile) && profile.enabled === false) nextDisabled[String(name)] = true\n      }\n    }\n    if (JSON.stringify(screenDisabled) !== JSON.stringify(nextDisabled)) screenDisabled = nextDisabled"
+  },
+  {
+    "label": "surfaces follow enabledScreens",
+    "count": 1,
+    "old": "  Variants {\n    model: Quickshell.screens\n\n    delegate: Component {\n      BarPanel {\n        required property var modelData\n\n        screen: modelData\n      }\n    }\n  }\n\n  Variants {\n    model: Quickshell.screens\n\n    delegate: Component {\n      DragGhostPanel {\n        required property var modelData\n\n        screen: modelData\n        ghostScreen: modelData\n      }\n    }\n  }\n\n  Variants {\n    model: Quickshell.screens\n\n    delegate: Component {\n      BarMoveGhostPanel {\n        required property var modelData\n\n        screen: modelData\n        ghostScreen: modelData\n      }\n    }\n  }",
+    "new": "  Variants {\n    model: root.enabledScreens\n\n    delegate: Component {\n      BarPanel {\n        required property var modelData\n\n        screen: modelData\n      }\n    }\n  }\n\n  Variants {\n    model: root.enabledScreens\n\n    delegate: Component {\n      DragGhostPanel {\n        required property var modelData\n\n        screen: modelData\n        ghostScreen: modelData\n      }\n    }\n  }\n\n  Variants {\n    model: root.enabledScreens\n\n    delegate: Component {\n      BarMoveGhostPanel {\n        required property var modelData\n\n        screen: modelData\n        ghostScreen: modelData\n      }\n    }\n  }"
+  },
+  {
+    "label": "wait for the host before drawing",
+    "count": 1,
+    "old": "  Variants {\n    model: root.enabledScreens\n\n    delegate: Component {\n      BarPanel {",
+    "new": "  // Nothing is drawn until the host has handed over the widget registry.\n  readonly property bool hostReady: barWidgetRegistry !== null\n\n  Variants {\n    model: root.hostReady ? root.enabledScreens : []\n\n    delegate: Component {\n      BarPanel {"
+  },
+  {
+    "label": "drag ghost waits too",
+    "count": 1,
+    "old": "  Variants {\n    model: root.enabledScreens\n\n    delegate: Component {\n      DragGhostPanel {",
+    "new": "  Variants {\n    model: root.hostReady ? root.enabledScreens : []\n\n    delegate: Component {\n      DragGhostPanel {"
+  },
+  {
+    "label": "move ghost waits too",
+    "count": 1,
+    "old": "  Variants {\n    model: root.enabledScreens\n\n    delegate: Component {\n      BarMoveGhostPanel {",
+    "new": "  Variants {\n    model: root.hostReady ? root.enabledScreens : []\n\n    delegate: Component {\n      BarMoveGhostPanel {"
+  },
+  {
+    "label": "settings delta stops at the default",
+    "count": 1,
+    "old": "      for (var s = 0; s < moduleSlots.length; s++) {\n        var slot = moduleSlots[s]\n        if (!slot || slot.region !== change.region || slot.moduleName !== entryId(change.entry)) continue\n        var item = slot.activeItem\n        if (item && \"settings\" in item) item.settings = settings\n      }",
+    "new": "      for (var s = 0; s < moduleSlots.length; s++) {\n        var slot = moduleSlots[s]\n        if (!slot || slot.region !== change.region || slot.moduleName !== entryId(change.entry)) continue\n        // The delta was computed against the default layout, so it has nothing\n        // to say about a screen rendering a profile of its own.\n        if (hasScreenProfile(slot.screenName)) continue\n        var item = slot.activeItem\n        if (item && \"settings\" in item) item.settings = settings\n      }"
+  }
+]
