@@ -299,6 +299,165 @@ Panel {
     })
   }
 
+  function isFirstParty(id) {
+    var plugins = registry ? registry.installedPlugins : null
+    var manifest = plugins ? plugins[String(id)] : null
+    return !!(manifest && manifest.__isFirstParty)
+  }
+
+  function inDefaultLayout(config, key) {
+    if (!config.bar || !config.bar.layout) return false
+    for (var s = 0; s < root.sections.length; s++) {
+      var entries = config.bar.layout[root.sections[s]]
+      if (!(entries instanceof Array)) continue
+      for (var i = 0; i < entries.length; i++)
+        if (entries[i] && String(entries[i].id) === key) return true
+    }
+    return false
+  }
+
+  function placedAnywhere(config, key) {
+    if (inDefaultLayout(config, key)) return true
+    var screens = config.bar ? config.bar.screens : null
+    if (!screens || typeof screens !== "object") return false
+    for (var name in screens) {
+      var layout = screens[name] ? screens[name].layout : null
+      if (!layout || typeof layout !== "object") continue
+      for (var s = 0; s < root.sections.length; s++) {
+        var entries = layout[root.sections[s]]
+        if (!(entries instanceof Array)) continue
+        for (var i = 0; i < entries.length; i++)
+          if (entries[i] && String(entries[i].id) === key) return true
+      }
+    }
+    return false
+  }
+
+  // Whether a widget's component gets loaded at all is upstream's call, and it
+  // answers with PluginRegistry.isEnabled(). For a third-party widget that
+  // falls through to findEntryLocation(), which looks in exactly two places:
+  // the default `bar.layout`, and `plugins`. It has never heard of
+  // `bar.screens` -- findBarLocation() only ever walks `config.bar.layout`.
+  //
+  // So a widget placed on a screen profile and nowhere else is never enabled.
+  // 5bars builds its slot on the right bar, the slot asks the registry for a
+  // component, the registry has none, and the slot renders 0x0: placed and
+  // invisible. That is the same failure the disabledPlugins line below guards
+  // against, reached through the other door.
+  //
+  // `plugins` is the door that fits. It means "load this", not "put it on
+  // every bar", so the placement stays exactly as per-screen as the user asked
+  // for. Writing into `bar.layout` would enable it too -- by putting it on
+  // every screen, which is the bug.
+  function ensureLoadable(config, key) {
+    if (isFirstParty(key)) return
+    if (!(config.plugins instanceof Array)) config.plugins = []
+    for (var i = 0; i < config.plugins.length; i++)
+      if (config.plugins[i] && String(config.plugins[i].id) === key) return
+    config.plugins.push({ id: key })
+  }
+
+  // The marker is only ours to take back once the widget is off every bar, and
+  // only when it is bare: an entry that grew settings is the user's, and
+  // dropping it would take their settings with it.
+  function dropLoadableMarker(config, key) {
+    if (!(config.plugins instanceof Array)) return
+    for (var i = 0; i < config.plugins.length; i++) {
+      var entry = config.plugins[i]
+      if (!entry || String(entry.id) !== key) continue
+      if (Object.keys(entry).length > 1) return
+      config.plugins.splice(i, 1)
+      return
+    }
+  }
+
+  // ── repair of configs written before the marker existed ────────────────
+
+  property bool loadableRepairDone: false
+
+  // addWidget keeps the marker right from here on, but a shell.json written by
+  // an older 5bars is already wrong on disk: the widget sits in a profile with
+  // nothing telling upstream to load it, so it stays invisible until the user
+  // removes and re-adds it. Nobody should have to guess that, so the upgrade
+  // repairs it once.
+  //
+  // Where this runs from was the real decision. Three candidates:
+  //
+  //   onOpenedChanged -- safe, but only repairs people who open the panel.
+  //   Bar.qml startup -- covers everyone, but the wrapper's startup carries
+  //     four rules that each cost an experiment, and a repair has no business
+  //     being the fifth.
+  //   this widget's own construction -- what it does.
+  //
+  // The third dominates the first at the first's risk. A config can only reach
+  // the broken state through this plugin, and every route to it -- the panel,
+  // or a hand edit copying what the panel writes -- leaves the 5bars widget on
+  // a bar, so anyone repairable by opening the panel is already repairable at
+  // construction, plus everyone who never thinks to open it. Same file, same
+  // object, nothing added to Bar.qml. The coverage the wrapper would buy on
+  // top of that is a user who has taken the 5bars button off every bar, who
+  // also has no way to open the panel and no way to have got here; that is not
+  // worth touching the wrapper for.
+  function repairLoadableMarkers() {
+    if (loadableRepairDone) return
+    var host = shellHost
+    var plugins = registry ? registry.installedPlugins : null
+    // Properties arrive by injection after construction, so a miss here is
+    // "not yet", not "never" -- leave the flag down and let the change signal
+    // bring us back.
+    if (!host || typeof host.mutateShellConfig !== "function" || !plugins) return
+    loadableRepairDone = true
+    // Read first and write only if there is something to write. On a healthy
+    // config this has to cost nothing: a shell.json round trip at startup
+    // rebuilds every bar on every screen, which is a lot to pay for a no-op.
+    if (missingLoadableMarkers(host.shellConfig, plugins).length === 0) return
+    mutate(function(config) {
+      var pending = missingLoadableMarkers(config, plugins)
+      for (var i = 0; i < pending.length; i++) ensureLoadable(config, pending[i])
+    })
+  }
+
+  function missingLoadableMarkers(config, plugins) {
+    var out = []
+    if (!config || !config.bar) return out
+    var screens = config.bar.screens
+    if (!screens || typeof screens !== "object") return out
+    var seen = ({})
+    for (var name in screens) {
+      var layout = screens[name] ? screens[name].layout : null
+      if (!layout || typeof layout !== "object") continue
+      for (var s = 0; s < sections.length; s++) {
+        var entries = layout[sections[s]]
+        if (!(entries instanceof Array)) continue
+        for (var i = 0; i < entries.length; i++) {
+          var key = entries[i] ? String(entries[i].id) : ""
+          if (key === "" || seen[key] === true) continue
+          seen[key] = true
+          var manifest = plugins[key]
+          if (!manifest || !(manifest.kinds instanceof Array)) continue
+          if (manifest.kinds.indexOf("bar-widget") === -1) continue
+          if (manifest.__isFirstParty) continue
+          if (inDefaultLayout(config, key)) continue
+          // Switched off on purpose: upstream's isDisabled() outranks the
+          // marker anyway, so writing one would not turn it back on -- it
+          // would only blur what the user said.
+          if (config.disabledPlugins instanceof Array
+              && config.disabledPlugins.indexOf(key) !== -1) continue
+          var marked = false
+          if (config.plugins instanceof Array)
+            for (var p = 0; p < config.plugins.length; p++)
+              if (config.plugins[p] && String(config.plugins[p].id) === key) { marked = true; break }
+          if (marked) continue
+          out.push(key)
+        }
+      }
+    }
+    return out
+  }
+
+  Component.onCompleted: Qt.callLater(root.repairLoadableMarkers)
+  onShellHostChanged: Qt.callLater(root.repairLoadableMarkers)
+
   function addWidget(id, section, screen) {
     var key = String(id)
     if (key === "") return
@@ -314,6 +473,9 @@ Panel {
         var at = config.disabledPlugins.indexOf(key)
         if (at !== -1) config.disabledPlugins.splice(at, 1)
       }
+      // Landing only on a screen profile is invisible to upstream's enablement
+      // check, so say it the way upstream can read.
+      if (!root.inDefaultLayout(config, key)) root.ensureLoadable(config, key)
     })
   }
 
@@ -324,8 +486,15 @@ Panel {
     mutate(function(config) {
       var arr = root.sectionArray(config, String(section), screen)
       for (var i = 0; i < arr.length; i++) {
-        if (arr[i] && String(arr[i].id) === key) { arr.splice(i, 1); return }
+        if (arr[i] && String(arr[i].id) === key) { arr.splice(i, 1); break }
       }
+      // Off every bar: the marker has nothing left to keep alive. Still on one,
+      // but no longer on the default: a profile is now the only thing placing
+      // it, so it needs the marker it never had -- this is how a profile seeded
+      // from the default (createProfile) turns into the invisible case, one
+      // removal at a time.
+      if (!root.placedAnywhere(config, key)) root.dropLoadableMarker(config, key)
+      else if (!root.inDefaultLayout(config, key)) root.ensureLoadable(config, key)
     })
   }
 
