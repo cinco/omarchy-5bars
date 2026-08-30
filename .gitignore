@@ -1,7 +1,4 @@
 *.bak
 .playwright-cli/
-dev/cartao-*.md
 .pares/
-dev/submissao-marketplace.md
-dev/analise-*.md
-dev/HANDOFF.md
+dev/*.md
