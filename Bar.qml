@@ -46,6 +46,7 @@ Item {
   property var inner: null
   property string mode: "starting"     // starting | patched | stock | failed
   property string failure: ""
+  property bool fellBack: false        // the stock bar is a one-shot; see fallback()
 
   // ── staging ────────────────────────────────────────────────────────────
 
@@ -57,6 +58,12 @@ Item {
     return h.toString(16) + "-" + text.length
   }
 
+  // Set by the staging FileViews when a write does not land: no space, no
+  // permission, XDG_CACHE_HOME pointing somewhere read-only. That is the one
+  // way this plugin breaks with no upstream drift at all, so it is worth
+  // catching where it happens.
+  property string stagingError: ""
+
   // The cache path is a DIRECTORY per hash, not a file per hash. A second
   // differently-named .qml in a directory the engine has already seen is
   // rejected with "File name case mismatch", and Qt.clearComponentCache() does
@@ -64,10 +71,19 @@ Item {
   // version sidesteps it entirely. (Learned the hard way: E3.2.)
   function stage(patched, barModel, hash) {
     var dir = cacheRoot + "/" + hash
+    stagingError = ""
     stagedBar.path = dir + "/Bar.qml"
     stagedBar.setText(patched)
     stagedModel.path = dir + "/BarModel.js"
     stagedModel.setText(barModel)
+    // blockWrites keeps setText synchronous, and saveFailed with it: by this
+    // line stagingError already says whether the two files landed. It is not
+    // fatal on its own — a cache that went read-only after a good run still
+    // holds the right bytes under this hash, and loading them beats a fallback
+    // nobody needed. It is kept so that if the load *does* fail, the reason can
+    // name the unwritable cache instead of the "No such file or directory" it
+    // has turned into by then.
+    if (stagingError !== "") console.warn("5bars: " + stagingError)
     return "file://" + dir + "/Bar.qml"
   }
 
@@ -109,12 +125,42 @@ Item {
   // second file name in a directory it has already loaded from — and a
   // fallback that itself fails leaves the session with no bar at all. (E3.1.)
   function fallback(reason) {
+    // Six paths can reach this, and one bad startup can trip more than one of
+    // them — an unwritable cache fails the staging write *and* the component
+    // that follows it. Falling back twice would build a second stock bar on top
+    // of the first, so the first reason wins and the rest are only logged.
+    if (fellBack) { console.warn("5bars: already falling back; also: " + reason); return }
+    fellBack = true
     failure = reason
     console.warn("5bars: falling back to the stock bar because: " + reason)
+    // A component errorString spans lines; a notification body reads better as
+    // one. The unsquashed text stays in `failure`, which is what ipc reports.
     notify.command = ["omarchy-notification-send", "-g", "󰍹", "5bars",
-      "Could not patch the bar, using the built-in one. " + reason]
+      "Could not patch the bar, using the built-in one. "
+        + String(reason).replace(/\s+/g, " ").trim()]
     notify.running = true
     load("file://" + upstreamDir + "/Bar.qml", "stock")
+  }
+
+  // Compiling or instantiating the staged bar can fail for reasons the anchor
+  // count cannot see: a staging write that never landed, or an upstream change
+  // that matches every anchor and still produces invalid QML — upstream adding
+  // a property this patch also adds is the obvious one, and the anchor keeps
+  // matching because it is a prefix of a block, not the whole block. Both are
+  // the same failure as a moved anchor and deserve the same exit: the stock bar
+  // of the user's own version, plus a notification.
+  //
+  // The stock attempt is where that stops. There is nothing left to load, and
+  // calling fallback() from there would ask for the same broken file again, so
+  // that one branch is allowed to end with no bar — loudly.
+  function loadFailed(wanted, reason) {
+    if (wanted === "stock") {
+      mode = "failed"
+      console.warn("5bars: " + reason)
+      return
+    }
+    if (stagingError !== "") reason = stagingError + "; " + reason
+    fallback(reason)
   }
 
   function load(url, wanted) {
@@ -122,8 +168,7 @@ Item {
     function ready() {
       if (component.status === Component.Loading) return
       if (component.status !== Component.Ready) {
-        mode = "failed"
-        console.warn("5bars: " + url + " failed to load: " + component.errorString())
+        loadFailed(wanted, url + " failed to load: " + component.errorString())
         return
       }
       // barConfig and manifest are NOT passed here. Qt turns a JS object with
@@ -140,8 +185,7 @@ Item {
         manifest: null
       })
       if (!created) {
-        mode = "failed"
-        console.warn("5bars: " + url + " could not be instantiated: " + component.errorString())
+        loadFailed(wanted, url + " could not be instantiated: " + component.errorString())
         return
       }
       created.barConfig = root.barConfig
@@ -198,7 +242,7 @@ Item {
     preload: true
     printErrors: true
     onLoaded: root.upstreamRead = true
-    onLoadFailed: function(error) { root.fallback("could not read " + path + ": " + error) }
+    onLoadFailed: function(error) { root.fallback("could not read " + path + ": " + FileViewError.toString(error)) }
   }
 
   FileView {
@@ -207,7 +251,7 @@ Item {
     preload: true
     printErrors: true
     onLoaded: root.modelRead = true
-    onLoadFailed: function(error) { root.fallback("could not read " + path + ": " + error) }
+    onLoadFailed: function(error) { root.fallback("could not read " + path + ": " + FileViewError.toString(error)) }
   }
 
   // blockWrites keeps setText synchronous, so the file is on disk before
@@ -221,7 +265,7 @@ Item {
     preload: true
     printErrors: true
     onLoaded: root.editsRead = true
-    onLoadFailed: function(error) { root.fallback("could not read edits.json: " + error) }
+    onLoadFailed: function(error) { root.fallback("could not read edits.json: " + FileViewError.toString(error)) }
   }
 
   FileView {
@@ -230,6 +274,12 @@ Item {
     blockWrites: true
     atomicWrites: true
     printErrors: true
+    onSaveFailed: function(error) {
+      // First failure wins, same as fallback(): Bar.qml is written before
+      // BarModel.js and is the more useful half of the message.
+      if (root.stagingError === "")
+        root.stagingError = "could not write " + path + ": " + FileViewError.toString(error)
+    }
   }
 
   FileView {
@@ -238,6 +288,12 @@ Item {
     blockWrites: true
     atomicWrites: true
     printErrors: true
+    onSaveFailed: function(error) {
+      // First failure wins, same as fallback(): Bar.qml is written before
+      // BarModel.js and is the more useful half of the message.
+      if (root.stagingError === "")
+        root.stagingError = "could not write " + path + ": " + FileViewError.toString(error)
+    }
   }
 
   Process { id: notify }
