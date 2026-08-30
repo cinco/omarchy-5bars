@@ -185,6 +185,23 @@ the bar root. That root exposes 141 members, and any third-party widget reaching
 for one the stand-in does not forward breaks silently. It changes a contract
 this plugin does not own, so it needs its own release and its own testing.
 
+**Enabling a third-party widget from Omarchy's own plugin settings.** Setup >
+Plugins, and `omarchy plugin enable`, read and write the default layout and
+nothing else. A widget you have placed on one screen shows up there as
+disabled, and switching it on puts it on *every* bar -- the opposite of what
+you asked for. Add and remove widgets from the 5bars panel instead: it writes
+the profile you are looking at.
+
+The reason is one function. `PluginRegistry.findBarLocation` walks
+`bar.layout` and stops, so every enablement question upstream answers, it
+answers for the default bar. `bar.screens` is this plugin's idea and upstream
+has no reason to know it exists yet. Until it does, 5bars also records a
+third-party widget it places on a screen profile in the top-level `plugins`
+list -- that entry means "load this", not "put it on every bar", and it is what
+keeps a per-screen widget from being treated as switched off for the crime of
+not being in the default layout. Taking the widget off the last screen takes
+the entry back out.
+
 ## Licence
 
 MIT. The bar engine is derived from Omarchy's own (MIT, David Heinemeier

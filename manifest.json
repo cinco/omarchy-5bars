@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "cinco.5bars",
   "name": "5bars",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "author": "Cinco Euzebio",
   "description": "Per-screen bar layouts. Every monitor renders the default bar until you give it one of its own, with its own left, center and right.",
   "kinds": [
