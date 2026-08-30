@@ -1069,8 +1069,15 @@ Panel {
                   fontFamily: root.fontFamily
                   fontSize: Style.font.bodySmall
                   onClicked: {
-                    root.addWidget(modelData.value, root.addSection, root.activeScreen)
+                    // Adding takes this widget out of availableWidgets, which
+                    // destroys this very delegate in the middle of the handler;
+                    // past that point the enclosing ids stop resolving and the
+                    // rest of the handler dies with a ReferenceError. Read what
+                    // is needed and clear the field while both still exist,
+                    // then touch nothing but locals and root.
+                    var chosen = modelData.value
                     addSearch.text = ""
+                    root.addWidget(chosen, root.addSection, root.activeScreen)
                   }
                 }
               }
