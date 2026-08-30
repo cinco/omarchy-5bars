@@ -479,6 +479,23 @@ Panel {
     })
   }
 
+  // What the add list's rows call, and it runs here rather than in the row
+  // because the row does not survive it. Adding a widget takes it out of
+  // availableWidgets, and clearing a filtered search box changes addQuery --
+  // either one rebuilds matchingWidgets, and the ListView destroys the delegate
+  // in the middle of its own onClicked. From that point no id of this document
+  // resolves in that scope, not addSearch and not root, so whichever statement
+  // ran second was dead: 1.0.0 added the widget and failed to clear the field,
+  // 1.0.1 swapped the two lines and failed to add anything at all, silently.
+  //
+  // The panel's own scope is not what the rebuild tears down. The row resolves
+  // root once, while it is still alive, and hands the whole job over; both ids
+  // below are looked up here, in a context that outlives the list.
+  function chooseWidget(id) {
+    root.addWidget(id, root.addSection, root.activeScreen)
+    addSearch.text = ""
+  }
+
   // Removing never disables the plugin: the same widget is very likely still
   // on another screen, and disabling would take it off that one too.
   function removeWidget(id, section, screen) {
@@ -1068,10 +1085,9 @@ Panel {
                   foreground: root.foreground
                   fontFamily: root.fontFamily
                   fontSize: Style.font.bodySmall
-                  onClicked: {
-                    root.addWidget(modelData.value, root.addSection, root.activeScreen)
-                    addSearch.text = ""
-                  }
+                  // Resolving root here, before anything mutates, is the whole
+                  // trick: this row is destroyed by the call it makes.
+                  onClicked: root.chooseWidget(modelData.value)
                 }
               }
 
