@@ -120,18 +120,6 @@
     "new": "  component ModuleSlot: Item {\n    id: slot\n\n    required property var entry\n    property string region: \"\"\n    // Which output this instance is drawn on. A layout entry is mounted once\n    // per bar surface, so this is what tells two copies of the same widget id\n    // apart -- and what routes a drag back to the profile it came from.\n    property string screenName: \"\"\n"
   },
   {
-    "label": "omarchyPath/barWidgetRegistry not required",
-    "count": 1,
-    "old": "  // The omarchy-shell host injects omarchyPath from OMARCHY_PATH.\n  required property string omarchyPath\n  // Injected by the host shell so bar slots can resolve enabled widgets.\n  required property var barWidgetRegistry",
-    "new": "  // The omarchy-shell host injects omarchyPath from OMARCHY_PATH.\n  property string omarchyPath: \"\"\n  // Injected by the host shell so bar slots can resolve enabled widgets.\n  property var barWidgetRegistry: null"
-  },
-  {
-    "label": "barConfig not required",
-    "count": 1,
-    "old": "  required property var barConfig",
-    "new": "  property var barConfig: null"
-  },
-  {
     "label": "registry null-guard",
     "count": 1,
     "old": "      var w = root.barWidgetRegistry.widgets",
@@ -146,8 +134,8 @@
   {
     "label": "injectProps teardown guard",
     "count": 1,
-    "old": "    function injectProps() {\n      var target = activeItem\n      if (!target) return\n      if (\"bar\" in target) target.bar = root",
-    "new": "    function injectProps() {\n      var host = root\n      var target = activeItem\n      if (!host || !target) return\n      if (\"bar\" in target) target.bar = host"
+    "old": "    function injectProps() {\n      var target = activeItem\n      if (!target) return\n      if (\"bar\" in target) target.bar = firstParty\n        ? root : root.pluginBarApiFor(pluginApiId, moduleName, registered)\n",
+    "new": "    function injectProps() {\n      var host = root\n      var target = activeItem\n      if (!host || !target) return\n      // 5bars' own Studio panel needs the real bar: it calls dropBarModule()\n      // and reads shell.pluginRegistry / shell.shellConfig, none of which the\n      // 4.0.3 PluginBarApi facade carries. Every OTHER third-party widget\n      // keeps the sandbox upstream gave it.\n      if (\"bar\" in target) target.bar = (firstParty || pluginApiId === \"cinco.5bars\")\n        ? host : host.pluginBarApiFor(pluginApiId, moduleName, registered)\n"
   },
   {
     "label": "per-screen transparency and off state",

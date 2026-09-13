@@ -140,8 +140,16 @@ table in `edits.json` in memory, and runs the result. Two things follow:
 
 ## Requirements
 
-Omarchy 4 (the Quickshell shell). No external dependencies, no daemons, no
-network access — everything happens inside `omarchy-shell` and `shell.json`.
+Omarchy **4.0.3 or newer** (the Quickshell shell). No external dependencies, no
+daemons, no network access — everything happens inside `omarchy-shell` and
+`shell.json`.
+
+4.0.3 reworked both halves of the plugin contract: it stopped handing a
+third-party bar the shell root, and it started handing third-party bar widgets
+a sandboxed bar facade. The edit table is anchored on that shell. On 4.0.0–4.0.2
+an anchor no longer matches, so 5bars does what it always does in that case —
+loads the stock bar of your own version and tells you why. Nothing breaks; you
+just get the built-in bar until you update Omarchy.
 
 ## Install
 

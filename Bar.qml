@@ -203,13 +203,64 @@ Item {
   // The host sets shell.bar to whatever it loaded — this wrapper — and then
   // everything reads the bar through it: panel hotkeys, transparency, bar
   // geometry, and the notification service asking how tall the bar is. The
-  // wrapper has none of that. Repointing shell.bar at the real object makes
-  // the whole thing transparent, and means no facade has to forward anything.
+  // wrapper has none of that. Repointing shell.bar at the real object used to
+  // make the whole thing transparent, so nothing had to be forwarded.
   // Verified both ways in a nested session: pointed at the wrapper, the
   // notification service reads a bar height of 0 and summon returns unknown;
   // pointed at the inner object, both are correct. (E1c.)
+  //
+  // Omarchy 4.0.3 closed that door. `configureBar` now hands a third-party bar
+  // `pluginShellFor(manifest)` (shell.qml:221) instead of ShellRoot, and that
+  // facade declares its own `bar` property (PluginShellApi.qml:16). The
+  // assignment below therefore lands on the facade and the real `shell.bar`
+  // stays pointed at this wrapper for good — silently, with every host read
+  // returning a zero or an "unknown". It is kept because it is still correct
+  // whenever `shell` really is ShellRoot, and it is free when it is not.
   function handOver() {
     if (shell && inner && shell.bar !== inner) shell.bar = inner
+  }
+
+  // True when the host handed over a sandboxed facade rather than ShellRoot,
+  // which is what makes the forwarding below load-bearing. ShellRoot owns
+  // configureBar(); the facade has no such method.
+  readonly property bool shellIsFacade: !!shell && typeof shell.configureBar !== "function"
+
+  // ── the host surface ───────────────────────────────────────────────────
+  // Exactly what shell.qml touches on `shell.bar`, forwarded to the real bar:
+  // the four scalars behind the per-plugin bar-state API (shell.qml:447-450),
+  // the three bar-widget panel calls behind summon/hide/isOpen (:1169, :1196,
+  // :1212), transparency (:1613), and the two diagnostics/hotkey entry points
+  // (:1712, :1732). `barConfig` is already a wrapper property, forwarded by
+  // onBarConfigChanged. Anything added to that list upstream lands here as a
+  // dead host read, not a crash — which is why status() reports the facade.
+  readonly property bool barHidden: inner ? inner.barHidden === true : false
+  readonly property int barSize: inner ? (inner.barSize || 0) : 0
+  readonly property string fontFamily: inner ? String(inner.fontFamily || "") : ""
+  readonly property string position: inner ? String(inner.position || "top") : "top"
+
+  function summonBarWidget(id) {
+    return !!inner && typeof inner.summonBarWidget === "function" && inner.summonBarWidget(id)
+  }
+
+  function hideBarWidget(id) {
+    return !!inner && typeof inner.hideBarWidget === "function" && inner.hideBarWidget(id)
+  }
+
+  function isBarWidgetOpen(id) {
+    return !!inner && typeof inner.isBarWidgetOpen === "function" && inner.isBarWidgetOpen(id)
+  }
+
+  function toggleTransparency() {
+    if (inner && typeof inner.toggleTransparency === "function") inner.toggleTransparency()
+  }
+
+  function debugBarGeometry() {
+    return inner && typeof inner.debugBarGeometry === "function" ? inner.debugBarGeometry() : []
+  }
+
+  function panelWidgetIdAt(region, index) {
+    return inner && typeof inner.panelWidgetIdAt === "function"
+      ? inner.panelWidgetIdAt(region, index) : ""
   }
 
   // Three things have to arrive before the bar can be built, and they arrive
@@ -307,7 +358,11 @@ Item {
         mode: root.mode,
         failure: root.failure,
         upstream: root.upstreamDir,
+        // On 4.0.3 this is true against the facade's own `bar` slot while the
+        // real shell.bar still points at the wrapper, so it says nothing about
+        // the host on its own — read it together with shellIsFacade.
         handedOver: !!(root.shell && root.inner && root.shell.bar === root.inner),
+        shellIsFacade: root.shellIsFacade,
         slots: root.inner && root.inner.moduleSlots ? root.inner.moduleSlots.length : 0,
         screens: root.inner && root.inner.enabledScreens
           ? root.inner.enabledScreens.map(function(s) { return String(s.name) }) : []

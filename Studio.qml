@@ -23,13 +23,38 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property var shellHost: bar ? bar.shell : null
-  readonly property var registry: shellHost ? shellHost.pluginRegistry : null
 
-  // Bound to the live config so the panel redraws the moment anything writes
-  // shell.json -- including a drag on either bar while this panel is open.
+  // Omarchy 4.0.3 stopped handing a third-party bar the ShellRoot:
+  // `configureBar` now passes `pluginShellFor(manifest)` (shell.qml:221), a
+  // PluginShellApi with neither `shellConfig` nor `pluginRegistry`, and
+  // `pluginRegistryFor()` scopes the plugin registry down to this plugin's own
+  // manifest. Both things this panel reads are still reachable, at different
+  // addresses, and the pre-4.0.3 ones are tried first so nothing changes when
+  // the host really is ShellRoot:
+  //
+  //   every bar widget  -> `bar.barWidgetRegistry`. A replacement bar has to be
+  //                        able to render them all, so upstream hands it the
+  //                        full snapshot (shell.qml:770) — id, component and
+  //                        the metadata built at shell.qml:1400.
+  //   the `bar:` subtree -> the facade's own `barConfig`, a deep copy of the
+  //                        live one refreshed on every shell.json write
+  //                        (shell.qml:879).
   readonly property var barConfig: {
     var config = shellHost ? shellHost.shellConfig : null
-    return config && config.bar ? config.bar : ({})
+    if (config && config.bar) return config.bar
+    return shellHost && shellHost.barConfig ? shellHost.barConfig : ({})
+  }
+
+  // { id: { component, metadata } }. Reading `.widgets` is what creates the
+  // binding dependency, so this re-evaluates when a plugin is enabled.
+  readonly property var widgetEntries: {
+    var reg = bar ? bar.barWidgetRegistry : null
+    return reg && reg.widgets ? reg.widgets : ({})
+  }
+
+  function widgetMeta(id) {
+    var entry = widgetEntries[String(id)]
+    return entry && entry.metadata ? entry.metadata : null
   }
 
   readonly property var sections: ["left", "center", "right"]
@@ -158,17 +183,9 @@ Panel {
     return String(barConfig.centerAnchor || "")
   }
 
-  function manifestFor(id) {
-    var plugins = registry ? registry.installedPlugins : null
-    return plugins ? plugins[String(id)] || null : null
-  }
-
   function displayName(id) {
-    var manifest = manifestFor(id)
-    if (manifest) {
-      var meta = manifest.barWidget || {}
-      return String(meta.displayName || manifest.name || id)
-    }
+    var meta = widgetMeta(id)
+    if (meta && meta.displayName) return String(meta.displayName)
     // Custom command/qml modules have no manifest; show the raw id, which came
     // from shell.json and is therefore untrusted.
     return safeText(id, 80)
@@ -182,25 +199,28 @@ Panel {
     return false
   }
 
-  // Installed bar widgets not already on the profile being edited. Scoped to
-  // the profile, not the bar: a widget on the wide screen is still available
-  // to add to the narrow one.
+  // Bar widgets not already on the profile being edited. Scoped to the
+  // profile, not the bar: a widget on the wide screen is still available to
+  // add to the narrow one.
+  //
+  // This lists every *enabled* bar widget rather than every installed one.
+  // Upstream only registers a widget once its plugin is enabled
+  // (shell.qml:1388), and 4.0.3 leaves a third-party bar no way to see the
+  // rest — `pluginRegistryFor()` hands back a registry scoped to this plugin
+  // alone. That matches what upstream is willing to tell a replacement bar,
+  // so it is what the list shows. Moving a widget between profiles, which is
+  // the whole job here, is unaffected: a widget on any bar is enabled.
   readonly property var availableWidgets: {
-    var revision = registry ? registry.registryRevision : 0
+    var entries = widgetEntries
     var config = barConfig
     var screen = activeScreen
-    var plugins = registry ? registry.installedPlugins : null
-    if (!plugins) return []
     var out = []
-    for (var id in plugins) {
-      var manifest = plugins[id]
-      if (!manifest || !(manifest.kinds instanceof Array)) continue
-      if (manifest.kinds.indexOf("bar-widget") === -1) continue
+    for (var id in entries) {
       if (isPlaced(id, screen)) continue
-      var meta = manifest.barWidget || {}
+      var meta = (entries[id] && entries[id].metadata) || {}
       out.push({
         value: String(id),
-        label: String(meta.displayName || manifest.name || id),
+        label: String(meta.displayName || id),
         description: String(meta.description || "")
       })
     }
@@ -299,10 +319,13 @@ Panel {
     })
   }
 
+  // A first-party bar widget is implicitly enabled — PluginRegistry.isEnabled()
+  // returns true for any non-`bar` first-party plugin that is not explicitly
+  // disabled (PluginRegistry.qml:161) — so it is always registered, and an id
+  // missing from the registry is never a first-party one.
   function isFirstParty(id) {
-    var plugins = registry ? registry.installedPlugins : null
-    var manifest = plugins ? plugins[String(id)] : null
-    return !!(manifest && manifest.__isFirstParty)
+    var meta = widgetMeta(id)
+    return !!(meta && meta.firstParty === true)
   }
 
   function inDefaultLayout(config, key) {
@@ -401,23 +424,41 @@ Panel {
   function repairLoadableMarkers() {
     if (loadableRepairDone) return
     var host = shellHost
-    var plugins = registry ? registry.installedPlugins : null
     // Properties arrive by injection after construction, so a miss here is
     // "not yet", not "never" -- leave the flag down and let the change signal
     // bring us back.
-    if (!host || typeof host.mutateShellConfig !== "function" || !plugins) return
+    if (!host || typeof host.mutateShellConfig !== "function") return
+    if (!bar || !bar.barWidgetRegistry) return
     loadableRepairDone = true
     // Read first and write only if there is something to write. On a healthy
     // config this has to cost nothing: a shell.json round trip at startup
     // rebuilds every bar on every screen, which is a lot to pay for a no-op.
-    if (missingLoadableMarkers(host.shellConfig, plugins).length === 0) return
+    var current = host.shellConfig ? host.shellConfig : ({ bar: barConfig })
+    if (missingLoadableMarkers(current).length === 0) return
     mutate(function(config) {
-      var pending = missingLoadableMarkers(config, plugins)
+      var pending = missingLoadableMarkers(config)
       for (var i = 0; i < pending.length; i++) ensureLoadable(config, pending[i])
     })
   }
 
-  function missingLoadableMarkers(config, plugins) {
+  // What "needs a marker" means without a plugin registry to consult. 4.0.3
+  // leaves this panel unable to ask whether an id is an installed bar widget,
+  // but it does not have to: upstream registers a widget exactly when its
+  // plugin is enabled, so an id that is absent from the widget registry is an
+  // id upstream is not loading — which is the broken state this repairs. The
+  // old `installedPlugins[key]` test is therefore replaced by two local ones:
+  // the entry is not a custom command/qml module (those are not plugin ids at
+  // all), and it is not first-party (always registered, so always present).
+  //
+  // The one case this admits that the old test rejected is an id naming no
+  // installed plugin — a hand-edited or stale profile entry. It earns a bare
+  // `plugins[]` marker that upstream ignores, which is a dead line in
+  // shell.json rather than any behaviour.
+  function isCustomModuleEntry(entry) {
+    return !!(entry && (entry.type || entry.exec || entry.source))
+  }
+
+  function missingLoadableMarkers(config) {
     var out = []
     if (!config || !config.bar) return out
     var screens = config.bar.screens
@@ -433,10 +474,8 @@ Panel {
           var key = entries[i] ? String(entries[i].id) : ""
           if (key === "" || seen[key] === true) continue
           seen[key] = true
-          var manifest = plugins[key]
-          if (!manifest || !(manifest.kinds instanceof Array)) continue
-          if (manifest.kinds.indexOf("bar-widget") === -1) continue
-          if (manifest.__isFirstParty) continue
+          if (isCustomModuleEntry(entries[i])) continue
+          if (isFirstParty(key)) continue
           if (inDefaultLayout(config, key)) continue
           // Switched off on purpose: upstream's isDisabled() outranks the
           // marker anyway, so writing one would not turn it back on -- it
