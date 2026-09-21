@@ -273,7 +273,52 @@ Item {
   property bool modelRead: false
   property bool editsRead: false
 
-  onSourcesReadyChanged: if (sourcesReady && mode === "starting") build()
+  onSourcesReadyChanged: if (sourcesReady && mode === "starting") { healRegistry(); build() }
+
+  // ── a registry of dead components ──────────────────────────────────────
+  // The host hands a third-party bar a *snapshot* of the widget registry: the
+  // same Component objects the host holds, copied into a facade at
+  // configureBar() time and refreshed only when the registry next changes.
+  // When this wrapper is torn down and built again in the same session --
+  // a shell.json that read as empty for an instant, because an editor
+  // truncated it before writing, is enough: the host falls back to the stock
+  // bar for that instant and comes back -- the snapshot it is handed was taken
+  // while the host was still dropping and re-creating those Components. Most
+  // entries then reference a Component that no longer exists, which QML reads
+  // as null, so every slot resolves to the empty module and the bar comes up
+  // blank. Nothing refreshes the facade afterwards; the next config write does,
+  // and that is what the user was doing by hand ("write anything to shell.json
+  // and it comes back"). Verified in a live session: 25 keys, 21 dead, 1 of 31
+  // slots visible; one no-op write later, 25 of 31.
+  //
+  // A no-op config mutation is that write, done from here. The host persists
+  // the same content (atomically), reassigns shellConfig, and re-syncs every
+  // facade before mutateShellConfig() returns, so the registry is live again
+  // by the time build() reads it. Once per instance: if the snapshot is still
+  // dead after that, this is not the failure it was written for.
+  function registryDead() {
+    var widgets = barWidgetRegistry ? barWidgetRegistry.widgets : null
+    if (!widgets) return false
+    for (var id in widgets) {
+      var entry = widgets[id]
+      if (entry && entry.component === null) return true
+    }
+    return false
+  }
+
+  property bool registryHealed: false
+
+  function healRegistry() {
+    if (registryHealed || !registryDead()) return
+    registryHealed = true
+    if (!shell || typeof shell.mutateShellConfig !== "function") {
+      console.warn("5bars: registry snapshot holds dead components and the host offers no way to refresh it")
+      return
+    }
+    console.log("5bars: registry snapshot holds dead components; asking the host for a fresh one")
+    shell.mutateShellConfig(function(config) {})
+    if (registryDead()) console.warn("5bars: registry snapshot still dead after the refresh; widgets may not render until the next config change")
+  }
 
   onInnerChanged: handOver()
   onBarConfigChanged: if (inner) inner.barConfig = barConfig

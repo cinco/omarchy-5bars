@@ -36,12 +36,22 @@ Panel {
   //                        able to render them all, so upstream hands it the
   //                        full snapshot (shell.qml:770) — id, component and
   //                        the metadata built at shell.qml:1400.
-  //   the `bar:` subtree -> the facade's own `barConfig`, a deep copy of the
-  //                        live one refreshed on every shell.json write
-  //                        (shell.qml:879).
+  //   the `bar:` subtree -> the bar's own `barConfig`, which the host assigns
+  //                        from the `bar:` subtree it is about to render.
+  //
+  // The facade also carries a `barConfig`, a deep copy refreshed on every
+  // shell.json write, and this panel used to read that one under 4.0.3. It is
+  // one write behind: the host refreshes the facades from inside
+  // onShellConfigChanged, where its own `barConfig` binding has not caught up
+  // with the new shellConfig yet, so the copy handed out is the previous one.
+  // A toggle here then flips the file on the first click and its switch on the
+  // second. The bar's `barConfig` is assigned from onBarConfigChanged, after
+  // the binding settled, so it is the value on screen; the facade stays as a
+  // fallback for a widget instance that has no bar yet.
   readonly property var barConfig: {
     var config = shellHost ? shellHost.shellConfig : null
     if (config && config.bar) return config.bar
+    if (bar && bar.barConfig) return bar.barConfig
     return shellHost && shellHost.barConfig ? shellHost.barConfig : ({})
   }
 
@@ -643,6 +653,10 @@ Panel {
     mutate(function(config) {
       ensureBarShape(config)
       config.bar.transparent = value === true
+      // Pills keep the strip clear whatever this says, so flipping it while
+      // they are on would change nothing on screen. Leave pills instead: the
+      // switch then lands on the look it names.
+      if (config.bar.pills === true) config.bar.pills = false
     })
   }
 
@@ -867,7 +881,7 @@ Panel {
           Toggle {
             width: parent.width
             label: "Transparent bar"
-            description: root.barConfig.pills === true ? "Inert while pills are on" : "Applies to every screen"
+            description: root.barConfig.pills === true ? "Switches pills off" : "Applies to every screen"
             checked: root.barConfig.transparent === true
             foreground: root.foreground
             fontFamily: root.fontFamily

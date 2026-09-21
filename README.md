@@ -79,8 +79,9 @@ the wallpaper to pick a readable text colour, while a capsule carries its own
 contrast and keeps the theme foreground. Pills therefore win — with both set,
 the strip is clear because of the pills, the sampled-colour path is never
 entered, and `transparent` keeps its value in the file for whenever pills are
-switched off. While pills are on, the transparency toggle (double-click, the
-menu, `omarchy bar transparent`) changes nothing visible.
+switched off. Toggling transparency while pills are on (double-click, the
+menu, `omarchy bar transparent`, the panel) flips that value **and** switches
+pills off, so the gesture always lands on the look it names.
 
 `pillOpacity` is the capsule's alpha over the theme bar background, `0` to `1`;
 the default `0.85` lets a hint of wallpaper through. A widget that paints its
