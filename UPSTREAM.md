@@ -69,7 +69,7 @@ Exits non-zero naming the first edit whose anchor moved. Re-anchor that edit in
 | Base | `shell/plugins/bar/Bar.qml`, read from the installed package |
 | Verified against | Omarchy 4.0.3-1 |
 | That file's sha256 (first 16) | `9874c0f36271840b` |
-| Edits | 30 |
+| Edits | 34 |
 
 ## Licence
 

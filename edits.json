@@ -178,5 +178,29 @@
     "count": 1,
     "old": "      for (var s = 0; s < moduleSlots.length; s++) {\n        var slot = moduleSlots[s]\n        if (!slot || slot.region !== change.region || slot.moduleName !== entryId(change.entry)) continue\n        var item = slot.activeItem\n        if (item && \"settings\" in item) item.settings = settings\n      }",
     "new": "      for (var s = 0; s < moduleSlots.length; s++) {\n        var slot = moduleSlots[s]\n        if (!slot || slot.region !== change.region || slot.moduleName !== entryId(change.entry)) continue\n        // The delta was computed against the default layout, so it has nothing\n        // to say about a screen rendering a profile of its own.\n        if (hasScreenProfile(slot.screenName)) continue\n        var item = slot.activeItem\n        if (item && \"settings\" in item) item.settings = settings\n      }"
+  },
+  {
+    "label": "pills state",
+    "count": 1,
+    "old": "  property bool transparent: false\n",
+    "new": "  property bool transparent: false\n  // ── Pills ──────────────────────────────────────────────────────────────\n  // `bar.pills: true` stops painting the strip and gives every widget a\n  // capsule of the theme bar background instead, so the wallpaper shows\n  // between widgets. It is a third look, not a flavour of `transparent`: a\n  // transparent strip has to sample the wallpaper to pick a readable text\n  // colour, while a capsule carries its own contrast and keeps the theme\n  // foreground. Pills therefore win over `transparent` -- with both set the\n  // strip is clear because of the pills, and the sampled-colour path is\n  // never entered. Global, like transparency, and for the same reason: every\n  // surface reads the one shared foreground.\n  property bool pills: false\n  // Capsule alpha over the theme bar background. 1 is a solid capsule; the\n  // default lets a hint of wallpaper through.\n  property real pillOpacity: 0.85\n\n  function normalizePillOpacity(value) {\n    if (value === undefined || value === null) return 0.85\n    var n = Number(value)\n    if (!isFinite(n)) return 0.85\n    return Math.min(1, Math.max(0, n))\n  }\n"
+  },
+  {
+    "label": "pills win over transparency",
+    "count": 1,
+    "old": "    setRequestedTransparency(config.transparent === true)\n",
+    "new": "    pills = config.pills === true\n    pillOpacity = normalizePillOpacity(config.pillOpacity)\n    // Never ask for the sampled foreground while pills are on: the capsules\n    // are the contrast, and the theme text colour is the one that reads on\n    // them. `transparent` is left in the file untouched, so switching pills\n    // off lands on whatever look it described.\n    setRequestedTransparency(!pills && config.transparent === true)\n"
+  },
+  {
+    "label": "pills paint no strip",
+    "count": 1,
+    "old": "    implicitHeight: root.vertical ? 0 : root.barSize\n    color: root.transparent ? \"transparent\" : root.background\n",
+    "new": "    implicitHeight: root.vertical ? 0 : root.barSize\n    // Pills paint their own backdrop per widget; the strip stays clear.\n    color: root.pills || root.transparent ? \"transparent\" : root.background\n"
+  },
+  {
+    "label": "capsule behind every slot",
+    "count": 1,
+    "old": "    HoverHandler { id: moduleHover }\n",
+    "new": "    HoverHandler { id: moduleHover }\n\n    // The capsule. Painted before the loaders so the widget sits on top of\n    // it; inset on the cross axis so it floats inside the strip rather than\n    // filling it, and by one unit on the main axis so two neighbours read as\n    // two capsules instead of one. A widget that paints its own backdrop\n    // opts out with `\"pill\": false` on its layout entry.\n    //\n    // `pillFirst` / `pillLast` are where grouping will attach: a slot in the\n    // middle of a shared capsule squares the corners that touch its\n    // neighbours and drops the gap on that side. Today every slot is a group\n    // of one.\n    readonly property bool pillEnabled: root.pills && slot.moduleSettings.pill !== false\n    readonly property bool pillFirst: true\n    readonly property bool pillLast: true\n\n    Rectangle {\n      id: slotPill\n\n      readonly property int crossInset: Style.space(2)\n      readonly property int mainGap: Style.space(1)\n      readonly property real corner: Math.min(width, height) / 2\n\n      visible: slot.pillEnabled && slot.width > 0 && slot.height > 0\n      anchors.fill: parent\n      anchors.topMargin: root.vertical ? (slot.pillFirst ? mainGap : 0) : crossInset\n      anchors.bottomMargin: root.vertical ? (slot.pillLast ? mainGap : 0) : crossInset\n      anchors.leftMargin: root.vertical ? crossInset : (slot.pillFirst ? mainGap : 0)\n      anchors.rightMargin: root.vertical ? crossInset : (slot.pillLast ? mainGap : 0)\n      // Which corners round follows the axis: on a horizontal bar the first\n      // slot owns the left pair, on a vertical one the top pair.\n      topLeftRadius: slot.pillFirst ? corner : 0\n      bottomLeftRadius: (root.vertical ? slot.pillLast : slot.pillFirst) ? corner : 0\n      topRightRadius: (root.vertical ? slot.pillFirst : slot.pillLast) ? corner : 0\n      bottomRightRadius: slot.pillLast ? corner : 0\n      color: Qt.rgba(root.background.r, root.background.g, root.background.b, root.pillOpacity)\n      border.width: 1\n      border.color: Qt.rgba(root.barForeground.r, root.barForeground.g, root.barForeground.b, 0.10)\n      opacity: slot.dragSource ? 0.35 : 1.0\n\n      Behavior on color {\n        enabled: root.foregroundAnimationEnabled\n        ColorAnimation { duration: 420; easing.type: Easing.InOutCubic }\n      }\n    }\n"
   }
 ]

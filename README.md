@@ -58,6 +58,38 @@ wonder why a bar changed.
 rather than parked off-screen the way the global bar-off hotkey does it, so the
 exclusion zone goes back and windows use the full height of that screen.
 
+## Pills
+
+```json
+{
+  "bar": {
+    "pills": true,
+    "pillOpacity": 0.85,
+    "layout": {
+      "right": [ { "id": "omarchy.media", "pill": false } ]
+    }
+  }
+}
+```
+
+`"pills": true` stops painting the strip and gives every widget a capsule of the
+theme bar background instead, so the wallpaper shows between widgets. It is a
+third look, not a flavour of `transparent`: a transparent strip has to sample
+the wallpaper to pick a readable text colour, while a capsule carries its own
+contrast and keeps the theme foreground. Pills therefore win — with both set,
+the strip is clear because of the pills, the sampled-colour path is never
+entered, and `transparent` keeps its value in the file for whenever pills are
+switched off. While pills are on, the transparency toggle (double-click, the
+menu, `omarchy bar transparent`) changes nothing visible.
+
+`pillOpacity` is the capsule's alpha over the theme bar background, `0` to `1`;
+the default `0.85` lets a hint of wallpaper through. A widget that paints its
+own backdrop opts out of the capsule with `"pill": false` on its layout entry.
+
+Pills are global, like transparency, and for the same reason: every surface
+reads the one shared foreground. Grouping neighbouring widgets into one capsule
+is not there yet; today every widget is a capsule of its own.
+
 ## The panel
 
 Writing `screens` blocks by hand gets old, so 5bars also ships a bar widget: a
@@ -70,7 +102,7 @@ carries what belongs to that screen.
 | Default | A screen with its own profile |
 |---|---|
 | <img src="assets/panel-default.png" alt="The default tab: bar position and transparency" width="330"> | <img src="assets/panel-screen.png" alt="A screen tab: the profile opt-in and this screen's bar toggle" width="330"> |
-| Position and **Transparent bar** live here, because they apply to every screen. | **Own profile** seeds a copy of the default; **Show the bar here** removes this screen's bar and gives its space back. |
+| Position, **Transparent bar** and **Pills** live here, because they apply to every screen. | **Own profile** seeds a copy of the default; **Show the bar here** removes this screen's bar and gives its space back. |
 
 It sits in the bar as a single icon:
 
@@ -112,8 +144,8 @@ hand-editing `shell.json`:
   there the widget is put back on the default profile first, so the control that
   turned a screen off is still around to turn it on.
 
-Bar position and transparency belong to the bar rather than to a screen, so they
-only appear on the default tab. **Not yet** says why.
+Bar position, transparency and pills belong to the bar rather than to a screen,
+so they only appear on the default tab. **Not yet** says why.
 
 ## Dragging
 

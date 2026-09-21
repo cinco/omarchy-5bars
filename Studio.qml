@@ -646,6 +646,13 @@ Panel {
     })
   }
 
+  function setPills(value) {
+    mutate(function(config) {
+      ensureBarShape(config)
+      config.bar.pills = value === true
+    })
+  }
+
   // Reorders go through the bar so the panel and a drag gesture stay one code
   // path. screenName is what routes the write to the right profile.
   function moveTo(id, fromSection, toSection, beforeId, screen) {
@@ -860,11 +867,21 @@ Panel {
           Toggle {
             width: parent.width
             label: "Transparent bar"
-            description: "Applies to every screen"
+            description: root.barConfig.pills === true ? "Inert while pills are on" : "Applies to every screen"
             checked: root.barConfig.transparent === true
             foreground: root.foreground
             fontFamily: root.fontFamily
             onClicked: root.setTransparent(!(root.barConfig.transparent === true))
+          }
+
+          Toggle {
+            width: parent.width
+            label: "Pills"
+            description: "A capsule per widget on a clear strip"
+            checked: root.barConfig.pills === true
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.setPills(!(root.barConfig.pills === true))
           }
         }
 
