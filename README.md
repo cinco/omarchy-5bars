@@ -82,6 +82,8 @@ switched off. Toggling transparency while pills are on (double-click, the
 menu, `omarchy bar transparent`, the panel) flips that value **and** switches
 pills off, so the gesture always lands on the look it names.
 
+<img src="assets/pills.png" alt="A bar with each widget in its own rounded capsule on a clear strip" width="760">
+
 A widget that paints its own backdrop opts out of the capsule with
 `"pill": false` on its layout entry.
 
