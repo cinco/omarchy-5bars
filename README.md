@@ -11,7 +11,7 @@ widgets on the right.
 while keeping everything else about the stock bar: the same widgets, the same
 panels, the same drag-to-reorder, the same `omarchy bar` commands.
 
-<img src="preview.png" alt="The 5bars panel editing one screen's profile" width="420">
+<img src="preview.png" alt="The 5bars panel: the screen tabs, the settings that apply to every screen, and the section rows" width="420">
 
 ## How it reads config
 
