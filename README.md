@@ -103,9 +103,19 @@ pill-border       = "foreground"
 pill-border-alpha = 0.10
 ```
 
-Values are the shell's own vocabulary: a palette role (`foreground`, `accent`,
-`urgent`, `muted`, `background`, `transparent`), a hex colour, or the name of
-another token.
+A value is any colour the theme already ships, so nothing has to be added to a
+theme for this to be useful:
+
+| | |
+|---|---|
+| a name from the theme's `colors.toml` | `lighter_background`, `selection`, `dark_background`, `green`, `bright_blue`, … |
+| a shell role | `foreground`, `accent`, `urgent`, `muted`, `background`, `transparent` |
+| another `shell.toml` key | `bar.active`, `popups.background`, … |
+| a hex colour | `#1b2530` |
+
+`lighter_background` is the shade every stock theme draws a card in, which is
+usually what a capsule wants: distinct from the strip, and still the theme's.
+It follows a theme switch like everything else here.
 
 A theme that ships these swaps them with itself. A machine that wants one
 colour whatever the theme is — a dark capsule that stays readable over a pale
