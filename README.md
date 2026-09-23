@@ -88,8 +88,47 @@ the default `0.85` lets a hint of wallpaper through. A widget that paints its
 own backdrop opts out of the capsule with `"pill": false` on its layout entry.
 
 Pills are global, like transparency, and for the same reason: every surface
-reads the one shared foreground. Grouping neighbouring widgets into one capsule
-is not there yet; today every widget is a capsule of its own.
+reads the one shared foreground.
+
+### Grouping
+
+Give `pill` a name instead of leaving it out, and neighbours carrying the same
+name share one capsule:
+
+```json
+{
+  "right": [
+    { "id": "omarchy.tray" },
+    { "id": "omarchy.bluetooth", "pill": "sys" },
+    { "id": "omarchy.network",   "pill": "sys" },
+    { "id": "omarchy.audio",     "pill": "sys" },
+    { "id": "omarchy.power" }
+  ]
+}
+```
+
+Bluetooth, network and audio become one capsule; the tray and power keep their
+own. The name is only an identity — call it what you like — and it groups
+neighbours, not everything that shares it: an entry between two members that
+carries a different name, or none, splits the run in two.
+
+Only widgets that are actually on the bar count. One that hides itself when it
+has nothing to say — media with no player — is skipped rather than splitting
+the capsule around a gap that is not there.
+
+A group lives inside one section of one screen. The centre is split by
+`centerAnchor`, so the anchor is always a capsule of its own and a group cannot
+reach across it.
+
+### Width
+
+A capsule is as wide as the widget paints, not as wide as the slot it sits in.
+The two differ for the tray: collapsed, it still holds the width its drawer
+needs to slide into, which is most of its slot and all of it empty. The bar
+reads that from the widget's own input mask -- the thing that keeps the empty
+part unhoverable is also the only description of the painted part a widget
+offers -- so the tray's capsule is chevron-sized, and grows as the drawer
+opens. A widget without a mask fills its slot, as before.
 
 ## The panel
 
