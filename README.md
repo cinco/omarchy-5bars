@@ -64,7 +64,6 @@ exclusion zone goes back and windows use the full height of that screen.
 {
   "bar": {
     "pills": true,
-    "pillOpacity": 0.85,
     "layout": {
       "right": [ { "id": "omarchy.media", "pill": false } ]
     }
@@ -83,12 +82,43 @@ switched off. Toggling transparency while pills are on (double-click, the
 menu, `omarchy bar transparent`, the panel) flips that value **and** switches
 pills off, so the gesture always lands on the look it names.
 
-`pillOpacity` is the capsule's alpha over the theme bar background, `0` to `1`;
-the default `0.85` lets a hint of wallpaper through. A widget that paints its
-own backdrop opts out of the capsule with `"pill": false` on its layout entry.
+A widget that paints its own backdrop opts out of the capsule with
+`"pill": false` on its layout entry.
 
 Pills are global, like transparency, and for the same reason: every surface
 reads the one shared foreground.
+
+### Colour
+
+A capsule is the theme's bar background at 0.85, with a hairline of the bar
+text, and it follows the theme as it changes. What it is painted with is theme
+business, so it is set where the shell keeps its other surfaces — `shell.toml`,
+not `shell.json`:
+
+```toml
+[bar]
+pill              = "background"
+pill-alpha        = 0.85
+pill-border       = "foreground"
+pill-border-alpha = 0.10
+```
+
+Values are the shell's own vocabulary: a palette role (`foreground`, `accent`,
+`urgent`, `muted`, `background`, `transparent`), a hex colour, or the name of
+another token.
+
+A theme that ships these swaps them with itself. A machine that wants one
+colour whatever the theme is — a dark capsule that stays readable over a pale
+wallpaper — puts them in `~/.config/omarchy/shell.toml`, where user keys win
+and survive a theme switch.
+
+A named group can carry its own pair, under its own name, falling back to the
+generic one for anything it leaves out:
+
+```toml
+pill-sys       = "#1b2530"
+pill-sys-alpha = 0.95
+```
 
 ### Grouping
 
