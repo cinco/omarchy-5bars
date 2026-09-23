@@ -44,6 +44,16 @@ silently, which is exactly how 4.0.3 broke:
 - `pluginRegistryFor()` scopes a plugin's registry view to its own manifest,
   so the panel enumerates bar widgets from `bar.barWidgetRegistry` instead.
 
+Pills widened that surface, so the same paragraph now covers more:
+
+| Reached for | If it goes away |
+|---|---|
+| `Color.pick`, `Color.pickAlpha`, `Color.flatColor`, `Util.alpha` | checked at runtime (`pillThemingAvailable`); capsules fall back to the bar background at 0.85, which is what they were before colour was configurable |
+| `~/.local/state/omarchy/current/theme/colors.toml` | read directly for the theme's full palette; absent or unreadable leaves the palette empty and tokens resolve through `Color` alone |
+| `Color.backgroundChanged` / `accentChanged` | `ignoreUnknownSignals`; costs the theme-switch refresh of the palette, not the bar |
+| `shell.mutateShellConfig` | already load-bearing for the panel; `healRegistry()` also uses it as a no-op write to force the host to re-hand its facades |
+| a bar widget's `containmentMask` | how a capsule learns what the widget actually paints; a widget without one fills its slot, which is the old behaviour |
+
 Checking a new release therefore means running the checker **and** confirming
 `shell.qml`'s `configureBar` still hands over what the wrapper expects. The
 `5bars` IPC target reports the injected shell's kind for exactly this reason:

@@ -117,18 +117,34 @@ theme for this to be useful:
 usually what a capsule wants: distinct from the strip, and still the theme's.
 It follows a theme switch like everything else here.
 
-A theme that ships these swaps them with itself. A machine that wants one
-colour whatever the theme is — a dark capsule that stays readable over a pale
-wallpaper — puts them in `~/.config/omarchy/shell.toml`, where user keys win
-and survive a theme switch.
-
-A named group can carry its own pair, under its own name, falling back to the
-generic one for anything it leaves out:
+A theme that ships these swaps them with itself, and a named group can carry
+its own pair under its own name, falling back to the generic one for anything
+it leaves out:
 
 ```toml
 pill-sys       = "#1b2530"
 pill-sys-alpha = 0.95
 ```
+
+The same four live in `shell.json` too, as `pillColor`, `pillOpacity`,
+`pillBorderColor` and `pillBorderOpacity`, and they win — the theme sets the
+look, you override it. That is the cascade the shell already runs on, and it is
+the half the panel can write: a bar plugin reaches config through
+`mutateShellConfig`, which is `shell.json` only.
+
+```
+shell.toml   [bar] pill = "lighter_background"      the theme's
+     ↓
+shell.json   "bar": { "pillColor": "accent" }       yours, and the panel's
+```
+
+Specificity comes first, source second — a group's own token beats the generic
+one either way — so a group's colour is a theme-level decision, which is also
+all the panel could express.
+
+The panel has the two that matter, under the Pills toggle: a colour built from
+the shades this theme actually ships, and an opacity slider. Picking **Theme
+default** clears the key and hands the capsule back to the theme.
 
 ### Grouping
 
@@ -181,8 +197,8 @@ carries what belongs to that screen.
 
 | Default | A screen with its own profile |
 |---|---|
-| <img src="assets/panel-default.png" alt="The default tab: bar position and transparency" width="330"> | <img src="assets/panel-screen.png" alt="A screen tab: the profile opt-in and this screen's bar toggle" width="330"> |
-| Position, **Transparent bar** and **Pills** live here, because they apply to every screen. | **Own profile** seeds a copy of the default; **Show the bar here** removes this screen's bar and gives its space back. |
+| <img src="assets/panel-default.png" alt="The default tab: bar position, transparency, and the pills controls" width="330"> | <img src="assets/panel-screen.png" alt="A screen tab: the profile opt-in and this screen's bar toggle" width="330"> |
+| Position, **Transparent bar** and **Pills** live here, because they apply to every screen — and with pills on, the capsule's colour and opacity too. | **Own profile** seeds a copy of the default; **Show the bar here** removes this screen's bar and gives its space back. |
 
 It sits in the bar as a single icon:
 

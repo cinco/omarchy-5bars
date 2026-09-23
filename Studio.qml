@@ -667,6 +667,52 @@ Panel {
     })
   }
 
+  // "" clears the key and hands the capsule back to the theme.
+  function setPillColor(token) {
+    mutate(function(config) {
+      ensureBarShape(config)
+      if (String(token) === "") delete config.bar.pillColor
+      else config.bar.pillColor = String(token)
+    })
+  }
+
+  function setPillOpacity(value) {
+    mutate(function(config) {
+      ensureBarShape(config)
+      config.bar.pillOpacity = Math.round(Math.min(1, Math.max(0, value)) * 100) / 100
+    })
+  }
+
+  // What the colour dropdown offers: the shades a capsule is plausibly drawn
+  // in, minus the ones this theme does not ship. Roles always resolve; the
+  // rest come from the theme's own palette, which the bar reads for exactly
+  // this reason. Anything outside the list -- another token, a hex -- still
+  // works, it is just written by hand, and shows up here as its own entry so
+  // choosing something else does not silently discard it.
+  readonly property var pillColorChoices: {
+    var palette = bar && bar.themePalette ? bar.themePalette : ({})
+    var out = [{ value: "", label: "Theme default" }]
+    var known = [
+      { value: "lighter_background", label: "Lighter background" },
+      { value: "dark_background", label: "Dark background" },
+      { value: "selection", label: "Selection" },
+      { value: "background", label: "Background", role: true },
+      { value: "muted", label: "Muted", role: true },
+      { value: "accent", label: "Accent", role: true },
+      { value: "urgent", label: "Urgent", role: true },
+      { value: "foreground", label: "Foreground", role: true }
+    ]
+    for (var i = 0; i < known.length; i++)
+      if (known[i].role === true || palette[known[i].value] !== undefined) out.push(known[i])
+    var current = String(barConfig.pillColor || "")
+    if (current !== "") {
+      var listed = false
+      for (var j = 0; j < out.length; j++) if (out[j].value === current) listed = true
+      if (!listed) out.push({ value: current, label: current })
+    }
+    return out
+  }
+
   // Reorders go through the bar so the panel and a drag gesture stay one code
   // path. screenName is what routes the write to the right profile.
   function moveTo(id, fromSection, toSection, beforeId, screen) {
@@ -896,6 +942,45 @@ Panel {
             foreground: root.foreground
             fontFamily: root.fontFamily
             onClicked: root.setPills(!(root.barConfig.pills === true))
+          }
+
+          // Only while pills are on: the controls would otherwise change
+          // something nothing is drawing.
+          Dropdown {
+            width: parent.width
+            visible: root.barConfig.pills === true
+            label: "Capsule colour"
+            options: root.pillColorChoices
+            value: String(root.barConfig.pillColor || "")
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            onChanged: function(v) { root.setPillColor(v) }
+          }
+
+          Column {
+            width: parent.width
+            visible: root.barConfig.pills === true
+            spacing: Style.space(2)
+
+            PanelSectionHeader {
+              width: parent.width
+              text: "CAPSULE OPACITY"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+            }
+
+            PanelSlider {
+              width: parent.width
+              bar: root.bar
+              minimum: 0
+              maximum: 1
+              step: 0.05
+              value: root.barConfig.pillOpacity === undefined ? 0.85 : Number(root.barConfig.pillOpacity)
+              // On release, not on every move: each write is a shell.json
+              // round trip through the host, and a drag would spend the whole
+              // gesture rewriting the file.
+              onReleased: function(v) { root.setPillOpacity(v) }
+            }
           }
         }
 
