@@ -85,8 +85,9 @@ pills off, so the gesture always lands on the look it names.
 A widget that paints its own backdrop opts out of the capsule with
 `"pill": false` on its layout entry.
 
-Pills are global, like transparency, and for the same reason: every surface
-reads the one shared foreground.
+Pills are global. They and transparency share the bar root's one foreground,
+and mixing them across screens would ask that single colour to be two things —
+see **The panel**.
 
 ### Colour
 
@@ -241,7 +242,11 @@ hand-editing `shell.json`:
   turned a screen off is still around to turn it on.
 
 Bar position, transparency and pills belong to the bar rather than to a screen,
-so they only appear on the default tab. **Not yet** says why.
+so they only appear on the default tab. For position and transparency that is a
+limit, and **Not yet** says why; for pills it is a decision. The two share the
+bar root's one foreground colour, and pills on one screen beside a transparent
+strip on another would ask that colour to be two things at once — the theme's,
+which reads against a capsule, and the wallpaper's, which reads against nothing.
 
 ## Dragging
 
