@@ -13,8 +13,8 @@ import Quickshell.Io
 // against a `qs.Ui` that has moved on. It never fails loudly; it just drifts.
 //
 // So nothing is copied. At startup this reads the `Bar.qml` of the *installed*
-// package, applies the edit table in `edits.json`, stages the result under the
-// user's cache, and instantiates that. The base is whatever version is on the
+// package, applies the edit table in `edits.json`, compiles the result in
+// memory, and instantiates that. The base is whatever version is on the
 // machine, so upstream fixes arrive on their own. When an edit no longer
 // matches — upstream moved the ground under an anchor — nothing is guessed:
 // the user gets the stock bar of their own version plus a notification saying
@@ -38,8 +38,6 @@ Item {
 
   readonly property string upstreamDir: (omarchyPath !== "" ? omarchyPath : Quickshell.env("OMARCHY_PATH") || "/usr/share/omarchy")
     + "/shell/plugins/bar"
-  readonly property string cacheRoot: (Quickshell.env("XDG_CACHE_HOME") || (Quickshell.env("HOME") + "/.cache"))
-    + "/omarchy-5bars"
 
   // The live bar. Everything the host and every widget talks to is this object,
   // never the wrapper — see handOver() for why that matters.
@@ -48,43 +46,52 @@ Item {
   property string failure: ""
   property bool fellBack: false        // the stock bar is a one-shot; see fallback()
 
-  // ── staging ────────────────────────────────────────────────────────────
+  // ── compiling ──────────────────────────────────────────────────────────
 
-  function hashOf(text) {
-    // djb2 over the text, plus the length. Only has to distinguish versions,
-    // not resist anything.
-    var h = 5381
-    for (var i = 0; i < text.length; i++) h = ((h * 33) ^ text.charCodeAt(i)) >>> 0
-    return h.toString(16) + "-" + text.length
-  }
+  // The patched text never touches the disk. An earlier version staged it as
+  // files under $XDG_CACHE_HOME and loaded them by URL, which meant running
+  // whatever sat at a predictable path in a directory nobody verified. Now it
+  // is compiled straight from the string this process just built, so there is
+  // no file to swap and no stale copy to pick up.
+  //
+  // The text is compiled against upstream's own URL. That is what resolves its
+  // relative import of BarModel.js — upstream's file, unmodified, so there is
+  // nothing of ours to stage next to it. Compiling from data leaves the
+  // engine's cache for that URL alone: the stock bar loaded from the same URL
+  // afterwards is the stock bar, not this.
+  readonly property string upstreamUrl: "file://" + upstreamDir + "/Bar.qml"
 
-  // Set by the staging FileViews when a write does not land: no space, no
-  // permission, XDG_CACHE_HOME pointing somewhere read-only. That is the one
-  // way this plugin breaks with no upstream drift at all, so it is worth
-  // catching where it happens.
-  property string stagingError: ""
-
-  // The cache path is a DIRECTORY per hash, not a file per hash. A second
-  // differently-named .qml in a directory the engine has already seen is
-  // rejected with "File name case mismatch", and Qt.clearComponentCache() does
-  // not invalidate the type loader's directory listing. One directory per
-  // version sidesteps it entirely. (Learned the hard way: E3.2.)
-  function stage(patched, barModel, hash) {
-    var dir = cacheRoot + "/" + hash
-    stagingError = ""
-    stagedBar.path = dir + "/Bar.qml"
-    stagedBar.setText(patched)
-    stagedModel.path = dir + "/BarModel.js"
-    stagedModel.setText(barModel)
-    // blockWrites keeps setText synchronous, and saveFailed with it: by this
-    // line stagingError already says whether the two files landed. It is not
-    // fatal on its own — a cache that went read-only after a good run still
-    // holds the right bytes under this hash, and loading them beats a fallback
-    // nobody needed. It is kept so that if the load *does* fail, the reason can
-    // name the unwritable cache instead of the "No such file or directory" it
-    // has turned into by then.
-    if (stagingError !== "") console.warn("5bars: " + stagingError)
-    return "file://" + dir + "/Bar.qml"
+  // Qt.createQmlObject() hands back an instance, but what has to be kept and
+  // reused across wrappers is a component — see CompiledBars — so the patched
+  // root object is compiled as the value of a Component-typed property, which
+  // QML wraps implicitly. (A literal Component root works too, and is warned
+  // about as deprecated.) The wrapper opens on the root object's own line and
+  // closes after it, so it shifts no line numbers — but the edits do, by
+  // hundreds of lines, and the patched text exists nowhere on disk. A line
+  // number alone would send whoever reads the notification to the wrong line
+  // of the installed Bar.qml, so each error quotes the offending line of the
+  // patched text as well.
+  //
+  // Compiling goes through CompiledBars, which keeps the result for the rest of
+  // the session; see there for why it cannot live in this wrapper.
+  function compile(patched) {
+    var at = patched.search(/^[A-Z][\w.]*\s*\{/m)
+    if (at < 0) throw new Error("no root object in the patched bar")
+    var text = patched.slice(0, at) + "QtObject { property Component bar: "
+      + patched.slice(at) + "\n}\n"
+    try {
+      return CompiledBars.component(text, upstreamUrl)
+    } catch (e) {
+      var errors = e.qmlErrors || []
+      if (errors.length === 0) throw e
+      var lines = patched.split("\n")
+      throw new Error("the patched bar does not compile: " + errors.map(function(err) {
+        var quoted = String(lines[err.lineNumber - 1] || "").trim()
+        if (quoted.length > 120) quoted = quoted.slice(0, 117) + "..."
+        return "patched Bar.qml:" + err.lineNumber + ":" + err.columnNumber + ": "
+          + err.message + (quoted !== "" ? " (at `" + quoted + "`)" : "")
+      }).join("; "))
+    }
   }
 
   function applyEdits(source) {
@@ -115,20 +122,39 @@ Item {
       return
     }
 
-    var url = stage(patched, upstreamModel.text(), hashOf(patched))
-    console.log("5bars: staged " + url)
-    load(url, "patched")
+    var component
+    try {
+      component = compile(patched)
+    } catch (e) {
+      fallback(String(e.message || e))
+      return
+    }
+    console.log("5bars: built the patched bar in memory")
+    patchedLoader.sourceComponent = component
+    var created = patchedLoader.item
+    if (!created) {
+      // The one thing a Loader cannot build that createObject() can: a root
+      // with a `required` property, which only an initial property satisfies.
+      // Upstream has none today — the host loads its own clones through a
+      // Loader too — but if one comes back, the patched bar is still worth
+      // more than the stock one, at the price of the teardown warnings the
+      // Loader exists to avoid. instantiate() falls back if this fails too.
+      patchedLoader.sourceComponent = null
+      console.warn("5bars: the Loader could not build the patched bar; retrying with createObject()")
+      instantiate(component, "patched", "the patched bar")
+      return
+    }
+    adopt(created, "patched")
   }
 
-  // The fallback loads upstream's file by its ORIGINAL url. Staging a copy of
-  // the stock bar into the cache directory fails — the engine refuses the
-  // second file name in a directory it has already loaded from — and a
-  // fallback that itself fails leaves the session with no bar at all. (E3.1.)
+  // The fallback loads upstream's file by its ORIGINAL url — the file as
+  // installed, with nothing of ours in between. A fallback that itself fails
+  // leaves the session with no bar at all. (E3.1.)
   function fallback(reason) {
-    // Six paths can reach this, and one bad startup can trip more than one of
-    // them — an unwritable cache fails the staging write *and* the component
-    // that follows it. Falling back twice would build a second stock bar on top
-    // of the first, so the first reason wins and the rest are only logged.
+    // Several paths can reach this, and one bad startup can trip more than one
+    // of them — both FileViews can fail at once. Falling back twice would
+    // build a second stock bar on top of the first, so the first reason wins
+    // and the rest are only logged.
     if (fellBack) { console.warn("5bars: already falling back; also: " + reason); return }
     fellBack = true
     failure = reason
@@ -139,16 +165,16 @@ Item {
       "Could not patch the bar, using the built-in one. "
         + String(reason).replace(/\s+/g, " ").trim()]
     notify.running = true
-    load("file://" + upstreamDir + "/Bar.qml", "stock")
+    load(upstreamUrl, "stock")
   }
 
-  // Compiling or instantiating the staged bar can fail for reasons the anchor
-  // count cannot see: a staging write that never landed, or an upstream change
-  // that matches every anchor and still produces invalid QML — upstream adding
-  // a property this patch also adds is the obvious one, and the anchor keeps
-  // matching because it is a prefix of a block, not the whole block. Both are
-  // the same failure as a moved anchor and deserve the same exit: the stock bar
-  // of the user's own version, plus a notification.
+  // Compiling or instantiating the patched bar can fail for reasons the anchor
+  // count cannot see: an upstream change that matches every anchor and still
+  // produces invalid QML. Upstream adding a property this patch also adds is
+  // the obvious one, and the anchor keeps matching because it is a prefix of a
+  // block, not the whole block. That is the same failure as a moved anchor and
+  // deserves the same exit: the stock bar of the user's own version, plus a
+  // notification.
   //
   // The stock attempt is where that stops. There is nothing left to load, and
   // calling fallback() from there would ask for the same broken file again, so
@@ -157,9 +183,16 @@ Item {
     if (wanted === "stock") {
       mode = "failed"
       console.warn("5bars: " + reason)
+      // fallback() already told the user the built-in bar was on its way. It
+      // is not, and a session with no bar and a notification saying otherwise
+      // is worse than one that says so. Its own Process: the first one may
+      // still be running.
+      notifyNoBar.command = ["omarchy-notification-send", "-g", "󰍹", "5bars",
+        "The built-in bar failed to load too; there is no bar. "
+          + String(reason).replace(/\s+/g, " ").trim()]
+      notifyNoBar.running = true
       return
     }
-    if (stagingError !== "") reason = stagingError + "; " + reason
     fallback(reason)
   }
 
@@ -171,33 +204,73 @@ Item {
         loadFailed(wanted, url + " failed to load: " + component.errorString())
         return
       }
-      // barConfig and manifest are NOT passed here. Qt turns a JS object with
-      // nested arrays into V4ReferenceObject sequences when it arrives as an
-      // initial property, and upstream's Array.isArray() checks then see
-      // nothing — the bar comes up empty. They are assigned as plain JS right
-      // after, which keeps them real arrays. Passing null still satisfies the
-      // `required` declarations. (E1b.)
-      var created = component.createObject(root, {
-        omarchyPath: root.omarchyPath,
-        barWidgetRegistry: root.barWidgetRegistry,
-        barConfig: null,
-        shell: root.shell,
-        manifest: null
-      })
-      if (!created) {
-        loadFailed(wanted, url + " could not be instantiated: " + component.errorString())
-        return
-      }
-      created.barConfig = root.barConfig
-      created.manifest = root.manifest
-      if ("pluginRegistry" in created) created.pluginRegistry = root.pluginRegistry
-      root.inner = created
-      root.mode = wanted
-      handOver()
-      console.log("5bars: bar up, mode=" + wanted)
+      instantiate(component, wanted, url)
     }
     if (component.status === Component.Loading) component.statusChanged.connect(ready)
     else ready()
+  }
+
+  function instantiate(component, wanted, what) {
+    // barConfig and manifest are NOT passed here. Qt turns a JS object with
+    // nested arrays into V4ReferenceObject sequences when it arrives as an
+    // initial property, and upstream's Array.isArray() checks then see
+    // nothing — the bar comes up empty. They are assigned as plain JS right
+    // after, which keeps them real arrays. Passing null still satisfies the
+    // `required` declarations. (E1b.)
+    var created = component.createObject(root, {
+      omarchyPath: root.omarchyPath,
+      barWidgetRegistry: root.barWidgetRegistry,
+      barConfig: null,
+      shell: root.shell,
+      manifest: null
+    })
+    if (!created) {
+      // A Ready component that fails here — an unset required property, say —
+      // leaves errorString() empty and the reason only in the shell log.
+      loadFailed(wanted, what + " could not be instantiated: "
+        + (component.errorString().trim() || "see the shell log for the reason"))
+      return
+    }
+    created.barConfig = root.barConfig
+    created.manifest = root.manifest
+    if ("pluginRegistry" in created) created.pluginRegistry = root.pluginRegistry
+    adopt(created, wanted)
+  }
+
+  // The patched bar is built by this Loader, not by createObject(), and the
+  // difference is its QML context. A bar created straight from the cached
+  // component gets a context under CompiledBars, which lives for the whole
+  // session, so when this wrapper is torn down the old bar's bindings are
+  // still live while its items come apart: every `parent.width` in a Repeater
+  // re-evaluates against a null parent, twelve TypeErrors per rebuild, blamed
+  // on a line of upstream's Bar.qml that does not hold that code. A Loader
+  // gives the item a context of its own and deletes that context before the
+  // item, so the bindings are dead by then — which is what destroying the
+  // wrapper's own context used to do for the file-based bar.
+  //
+  // The price is that a Loader takes no initial properties, so everything is
+  // injected after Component.onCompleted, in the order configureBar()
+  // (shell.qml) uses. That is how the host itself injects every third-party
+  // bar, upstream's own clone included, so upstream's Bar.qml is built for it.
+  Loader {
+    id: patchedLoader
+    asynchronous: false
+    onLoaded: {
+      var created = item
+      created.omarchyPath = root.omarchyPath
+      created.shell = root.shell
+      created.manifest = root.manifest
+      created.barWidgetRegistry = root.barWidgetRegistry
+      if ("pluginRegistry" in created) created.pluginRegistry = root.pluginRegistry
+      created.barConfig = root.barConfig
+    }
+  }
+
+  function adopt(created, wanted) {
+    root.inner = created
+    root.mode = wanted
+    handOver()
+    console.log("5bars: bar up, mode=" + wanted)
   }
 
   // The host sets shell.bar to whatever it loaded — this wrapper — and then
@@ -265,12 +338,11 @@ Item {
 
   // Three things have to arrive before the bar can be built, and they arrive
   // independently: the host injects the registry after loading this component,
-  // and the two FileViews load asynchronously. Waiting on all three is the
+  // and the two FileViews load asynchronously. Waiting on all of them is the
   // whole point — the first version built as soon as the registry landed, read
   // an empty file, and fell back to the stock bar for no reason.
-  readonly property bool sourcesReady: upstreamRead && modelRead && editsRead && barWidgetRegistry !== null
+  readonly property bool sourcesReady: upstreamRead && editsRead && barWidgetRegistry !== null
   property bool upstreamRead: false
-  property bool modelRead: false
   property bool editsRead: false
 
   onSourcesReadyChanged: if (sourcesReady && mode === "starting") { healRegistry(); build() }
@@ -341,18 +413,6 @@ Item {
     onLoadFailed: function(error) { root.fallback("could not read " + path + ": " + FileViewError.toString(error)) }
   }
 
-  FileView {
-    id: upstreamModel
-    path: root.upstreamDir + "/BarModel.js"
-    preload: true
-    printErrors: true
-    onLoaded: root.modelRead = true
-    onLoadFailed: function(error) { root.fallback("could not read " + path + ": " + FileViewError.toString(error)) }
-  }
-
-  // blockWrites keeps setText synchronous, so the file is on disk before
-  // createComponent is asked for its url; without it the component can be
-  // created against a path that does not exist yet.
   // The edit table, read rather than imported: one file is the source of truth
   // for both this and the offline checker in dev/, so they cannot drift.
   FileView {
@@ -364,35 +424,8 @@ Item {
     onLoadFailed: function(error) { root.fallback("could not read edits.json: " + FileViewError.toString(error)) }
   }
 
-  FileView {
-    id: stagedBar
-    preload: false
-    blockWrites: true
-    atomicWrites: true
-    printErrors: true
-    onSaveFailed: function(error) {
-      // First failure wins, same as fallback(): Bar.qml is written before
-      // BarModel.js and is the more useful half of the message.
-      if (root.stagingError === "")
-        root.stagingError = "could not write " + path + ": " + FileViewError.toString(error)
-    }
-  }
-
-  FileView {
-    id: stagedModel
-    preload: false
-    blockWrites: true
-    atomicWrites: true
-    printErrors: true
-    onSaveFailed: function(error) {
-      // First failure wins, same as fallback(): Bar.qml is written before
-      // BarModel.js and is the more useful half of the message.
-      if (root.stagingError === "")
-        root.stagingError = "could not write " + path + ": " + FileViewError.toString(error)
-    }
-  }
-
   Process { id: notify }
+  Process { id: notifyNoBar }
 
   // Diagnostics, and what the tests drive.
   IpcHandler {

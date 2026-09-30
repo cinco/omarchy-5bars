@@ -7,10 +7,13 @@ modified. What it does **not** do is ship a modified copy.
 
 ## How it works
 
-`Bar.qml` in this repo is a ~230-line wrapper. At startup it reads the
+`Bar.qml` in this repo is a ~450-line wrapper. At startup it reads the
 `Bar.qml` of the **installed** Omarchy package, applies the table in
-`edits.json`, stages the result under `$XDG_CACHE_HOME/omarchy-5bars/<hash>/`,
-and instantiates that. Nothing upstream is copied into this repository — the
+`edits.json`, compiles the result in memory, and instantiates that. The
+patched text is never written to disk, so there is no staged copy for anything
+else to replace. `CompiledBars.qml` (a singleton, registered by `qmldir`)
+keeps each compiled text for the rest of the session, so rebuilding the bar
+does not compile it again. Nothing upstream is copied into this repository — the
 only upstream text here is the anchors quoted in `edits.json`.
 
 Two things follow from that, and they are the whole reason for the design:
