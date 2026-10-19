@@ -3,9 +3,10 @@ MIT License
 Copyright (c) 2026 Cinco Euzebio
 Copyright (c) David Heinemeier Hansson
 
-No Omarchy source is copied into this repository. `edits.json` quotes fragments
-of Omarchy's bar plugin (github.com/basecamp/omarchy, MIT) as the anchors of a
-patch applied in memory, at runtime, to the installed package. See UPSTREAM.md.
+No Omarchy source is copied into this repository. `edits.json` and
+`edits-legacy.json` quote fragments of Omarchy's bar plugin
+(github.com/basecamp/omarchy, MIT) as the anchors of a patch applied in memory,
+at runtime, to the installed package. See UPSTREAM.md.
 Everything else is original to this repository.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy

@@ -8,13 +8,15 @@ modified. What it does **not** do is ship a modified copy.
 ## How it works
 
 `Bar.qml` in this repo is a ~450-line wrapper. At startup it reads the
-`Bar.qml` of the **installed** Omarchy package, applies the table in
-`edits.json`, compiles the result in memory, and instantiates that. The
+`Bar.qml` of the **installed** Omarchy package, applies an edit table,
+compiles the result in memory, and instantiates that. There are two tables,
+one per generation of the bar (see below), and the first whose anchors all
+match wins. The
 patched text is never written to disk, so there is no staged copy for anything
 else to replace. `CompiledBars.qml` (a singleton, registered by `qmldir`)
 keeps each compiled text for the rest of the session, so rebuilding the bar
 does not compile it again. Nothing upstream is copied into this repository — the
-only upstream text here is the anchors quoted in `edits.json`.
+only upstream text here is the anchors quoted in the edit tables.
 
 Two things follow from that, and they are the whole reason for the design:
 
@@ -67,24 +69,61 @@ qs ipc -i <instance> call 5bars status     # shellIsFacade tells you which
 
 ## Checking a new Omarchy release
 
-`edits.json` is the single source of truth: the plugin reads it at runtime and
-the offline checker reads the same file.
+The tables are the single source of truth: the plugin reads them at runtime
+and the offline checker reads the same files, in the same order.
 
 ```bash
 python3 dev/apply-edits.py /usr/share/omarchy/shell/plugins/bar/Bar.qml
 ```
 
-Exits non-zero naming the first edit whose anchor moved. Re-anchor that edit in
-`edits.json`; do not hand-edit anything else.
+Reports each table and which one the plugin will use; exits non-zero when
+neither applies, naming the first edit whose anchor moved in each. Re-anchor
+that edit in the table for that generation; do not hand-edit anything else.
 
-| | |
-|---|---|
-| Base | `shell/plugins/bar/Bar.qml`, read from the installed package |
-| Verified against | Omarchy 4.0.3-1 |
-| That file's sha256 (first 16) | `9874c0f36271840b` |
-| Edits | 35 |
+| | `edits.json` (pooled) | `edits-legacy.json` (legacy) |
+|---|---|---|
+| Base | `shell/plugins/bar/Bar.qml`, read from the installed package | same |
+| Verified against | omarchy-dev 4.0.0.r7083.g81fd2d2-1 | omarchy 4.0.5 (tag `v4.0.5`) |
+| That file's sha256 (first 16) | `33f359bfba0cd17d` | `a8f27b3d8f29f8b8` |
+| Edits | 30 | 35 |
+
+The legacy table is 5bars 1.1.1's, unchanged. It stays for as long as a stable
+release ships the bar before the pool; when none does, it can go. The panel
+follows whichever was applied — it tells them apart by `dropBarModule()`, which
+only the legacy bar has — so on 4.0.x it still shows three sections, the centre
+anchor and the transparency switch, and never migrates `shell.json`.
+
+## The pooled bar (5bars 1.2.0)
+
+r7083 rewrote the bar around a widget pool, and 29 of 35 anchors went at once.
+This was a re-port rather than a re-anchor, because what the edits hook into
+changed shape — and the stable channel had not moved yet, so the old table was
+kept beside the new one instead of replaced:
+
+- **Widgets come from a pool per surface.** `BarModel.layoutWidgets` gives every
+  layout entry a key it keeps wherever it moves; each surface's `WidgetPool`
+  builds one `WidgetHost` per key and lends it to the `ModuleSlot` showing it.
+  So per-screen layouts are now per-screen *widget sets*: `screenWidgets`
+  holds one `layoutWidgets` result per profile, each with its own memo,
+  `BarPanel.widgets` picks the surface's, and the pool, the hosts and every
+  section list read through it. Keys only need to be unique within a profile.
+- **Drags write through `BarModel.moveEntry`,** which only knows
+  `config.bar.layout`. `profileConfig()` hands it a config-shaped view of the
+  screen's profile, and the move carries its screen, because the drag is
+  cleared before the move lands.
+- **The settings delta is gone.** A settings-only write keeps its widget and
+  hands it the new entry, so neither the delta guard nor `pillSignature` is
+  needed any more.
+- **`centerAnchor` is gone,** replaced by `centerBegin`/`center`/`centerEnd`.
+  Upstream's migration (1791969355) skips any config whose bar is not the
+  built-in one, so 5bars splits on read and rewrites the file once
+  (`migrateCenterAnchors`), profile by profile.
+- **`transparent` became `background`** (`opaque`/`glassy`/`none`). Pills
+  read it the way upstream does, and the pooled host calls `cycleBackground`
+  where the legacy one calls `toggleTransparency`. The wrapper forwards both,
+  together with `screenBarSizes`, which the pooled host now reads too.
 
 ## Licence
 
-Omarchy is MIT (David Heinemeier Hansson). The anchors in `edits.json` quote
+Omarchy is MIT (David Heinemeier Hansson). The anchors in the edit tables quote
 its source; `LICENSE` carries both notices.

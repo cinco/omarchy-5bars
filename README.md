@@ -29,11 +29,11 @@ output is given an entry under `bar.screens`:
     },
     "screens": {
       "HDMI-A-1": {
-        "centerAnchor": "omarchy.clock",
         "layout": {
-          "left":   [ { "id": "omarchy.menu" } ],
-          "center": [ { "id": "omarchy.clock", "format": "HH:mm" } ],
-          "right":  [ { "id": "omarchy.power" } ]
+          "left":     [ { "id": "omarchy.menu" } ],
+          "center":   [ { "id": "omarchy.clock", "format": "HH:mm" } ],
+          "centerEnd": [ { "id": "omarchy.weather" } ],
+          "right":    [ { "id": "omarchy.power" } ]
         }
       }
     }
@@ -42,9 +42,19 @@ output is given an entry under `bar.screens`:
 ```
 
 A screen profile has the same shape as the bar subtree itself — a `layout` plus
-an optional `centerAnchor` and `enabled` — so it is a bar config
-in miniature rather than a second schema to learn. Output names are Hyprland's:
-`hyprctl monitors`.
+an optional `enabled` — so it is a bar config in miniature rather than a second
+schema to learn. A layout has the stock bar's sections: `left`, `centerBegin`,
+`center`, `centerEnd`, `right`, and `tray` for the tray's drawer. Output names
+are Hyprland's: `hyprctl monitors`.
+
+Older configs pinned the centre with `centerAnchor`. Omarchy replaced it with
+the `centerBegin`/`center`/`centerEnd` split and migrated `shell.json` — except
+for a third-party bar, which 5bars is. So 5bars does the same split itself, once,
+for the default and for every screen profile: the anchor stays in `center`, and
+what flanked it moves to the sections either side. That happens only on an
+Omarchy that has the split; on the stable 4.0.x releases the bar still has
+`left`/`center`/`right` and a `centerAnchor`, the panel edits those, and the
+file is left as it is.
 
 An output with no entry renders the default, and that is also what makes a
 renamed connector a non-event. Hyprland re-enumerates outputs on a replug or a
@@ -73,14 +83,15 @@ exclusion zone goes back and windows use the full height of that screen.
 
 `"pills": true` stops painting the strip and gives every widget a capsule of the
 theme bar background instead, so the wallpaper shows between widgets. It is a
-third look, not a flavour of `transparent`: a transparent strip has to sample
+third look, not a flavour of a clear background: a clear strip has to sample
 the wallpaper to pick a readable text colour, while a capsule carries its own
-contrast and keeps the theme foreground. Pills therefore win — with both set,
-the strip is clear because of the pills, the sampled-colour path is never
-entered, and `transparent` keeps its value in the file for whenever pills are
-switched off. Toggling transparency while pills are on (double-click, the
-menu, `omarchy bar transparent`, the panel) flips that value **and** switches
-pills off, so the gesture always lands on the look it names.
+contrast and keeps the theme foreground. Pills therefore win — whatever
+`background` says, the strip is clear because of the pills, the sampled-colour
+path is never entered, and `background` keeps its value in the file for
+whenever pills are switched off. Cycling the background while pills are on
+(double-click on the bar, the hotkey) switches pills off instead, landing on the
+background the file already names; picking a background in the panel does the
+same.
 
 <img src="assets/pills.png" alt="A bar with each widget in its own rounded capsule on a clear strip" width="760">
 
@@ -175,9 +186,9 @@ Only widgets that are actually on the bar count. One that hides itself when it
 has nothing to say — media with no player — is skipped rather than splitting
 the capsule around a gap that is not there.
 
-A group lives inside one section of one screen. The centre is split by
-`centerAnchor`, so the anchor is always a capsule of its own and a group cannot
-reach across it.
+A group lives inside one section of one screen, so a group cannot reach across
+the edges of the centre box. Widgets in the tray's drawer get no capsule of
+their own: they already sit inside the tray's.
 
 ### Width
 
@@ -201,7 +212,7 @@ carries what belongs to that screen.
 | Default | A screen with its own profile |
 |---|---|
 | <img src="assets/panel-default.png" alt="The default tab: bar position, transparency, and the pills controls" width="330"> | <img src="assets/panel-screen.png" alt="A screen tab: the profile opt-in and this screen's bar toggle" width="330"> |
-| Position, **Transparent bar** and **Pills** live here, because they apply to every screen — and with pills on, the capsule's colour and opacity too. | **Own profile** seeds a copy of the default; **Show the bar here** removes this screen's bar and gives its space back. |
+| Position, the background (**Opaque**, **Glassy**, **Clear**; a **Transparent bar** switch on stable 4.0.x) and **Pills** live here, because they apply to every screen — and with pills on, the capsule's colour and opacity too. | **Own profile** seeds a copy of the default; **Show the bar here** removes this screen's bar and gives its space back. |
 
 It sits in the bar as a single icon:
 
@@ -262,8 +273,10 @@ editing.
 ## Nothing is copied
 
 5bars changes Omarchy's bar engine, but it does not ship a modified copy of it.
-At startup it reads the `Bar.qml` of the **installed** package, applies the edit
-table in `edits.json` in memory, and runs the result. Two things follow:
+At startup it reads the `Bar.qml` of the **installed** package, applies an edit
+table in memory, and runs the result. Two tables ship, one per generation of
+Omarchy's bar — `edits.json` and `edits-legacy.json` — and the one whose
+anchors match is used. Two things follow:
 
 - Upstream fixes arrive on their own. The base is whatever version is on your
   machine.
@@ -275,16 +288,12 @@ table in `edits.json` in memory, and runs the result. Two things follow:
 
 ## Requirements
 
-Omarchy **4.0.3 or newer** (the Quickshell shell). No external dependencies, no
-daemons, no network access — everything happens inside `omarchy-shell` and
-`shell.json`.
-
-4.0.3 reworked both halves of the plugin contract: it stopped handing a
-third-party bar the shell root, and it started handing third-party bar widgets
-a sandboxed bar facade. The edit table is anchored on that shell. On 4.0.0–4.0.2
-an anchor no longer matches, so 5bars does what it always does in that case —
-loads the stock bar of your own version and tells you why. Nothing breaks; you
-just get the built-in bar until you update Omarchy.
+Omarchy 4 (the Quickshell shell). Both generations of its bar are covered: the
+stable 4.0.x releases (checked against 4.0.5), and the pooled bar with the
+`centerBegin`/`center`/`centerEnd` sections and a `background` key that
+`omarchy-dev` ships from 4.0.0.r7083. No external dependencies, no daemons, no
+network access — everything happens inside `omarchy-shell` and `shell.json`.
+On a bar neither table matches, 5bars loads the stock bar and says why.
 
 ## Install
 

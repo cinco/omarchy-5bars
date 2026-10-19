@@ -7,11 +7,12 @@ import qs.Ui
 // Visual editor for per-screen bar layouts.
 //
 // One tab per output, plus the default profile every output falls back to.
-// Reordering goes through the bar's own bar.dropBarModule() -- the same call
-// a drag gesture makes -- so an edit here and a drag on the bar are the same
-// shell.json write, landing in the same profile. Adds, removes and profile
-// creation are written here, because the plugin registry's placement helpers
-// only know about bar.layout and would silently retarget the default.
+// Every edit is written here, into the profile being edited, because the
+// plugin registry's placement helpers only know about bar.layout and would
+// silently retarget the default. A drag on the bar lands by the same rule
+// (Bar.qml's profileConfig), so the two never disagree about where an edit
+// goes. On the legacy bar a move still goes through its dropBarModule(), the
+// same call its drag makes.
 Panel {
   id: root
   moduleName: "cinco.5bars"
@@ -67,8 +68,27 @@ Panel {
     return entry && entry.metadata ? entry.metadata : null
   }
 
-  readonly property var sections: ["left", "center", "right"]
-  readonly property var sectionLabels: ({ "left": "LEFT", "center": "CENTER", "right": "RIGHT" })
+  // Which bar 5bars patched (Bar.qml's `edition`). The legacy one is the bar
+  // before the widget pool, still shipped by the stable 4.0.x releases: three
+  // sections, a centre anchor, a transparency switch, and dropBarModule(),
+  // which the pooled bar does not have.
+  readonly property bool legacy: !!bar && typeof bar.dropBarModule === "function"
+
+  // The bar's sections in the order they run along it, as upstream's
+  // Util.barSections has them: the center box with a section hanging off each
+  // of its edges, and the tray's drawer last, since it is drawn inside the
+  // tray rather than on the bar.
+  readonly property var sections: legacy
+    ? ["left", "center", "right"]
+    : ["left", "centerBegin", "center", "centerEnd", "right", "tray"]
+  readonly property var sectionLabels: ({
+    "left": "LEFT",
+    "centerBegin": "BEFORE CENTER",
+    "center": "CENTER",
+    "centerEnd": "AFTER CENTER",
+    "right": "RIGHT",
+    "tray": "TRAY DRAWER"
+  })
 
   // "" is the default profile. Any other value is an output name.
   property string activeScreen: ""
@@ -178,11 +198,13 @@ Panel {
   }
 
   function countIn(screen) {
-    return entriesIn("left", screen).length
-      + entriesIn("center", screen).length
-      + entriesIn("right", screen).length
+    var n = 0
+    for (var s = 0; s < sections.length; s++) n += entriesIn(sections[s], screen).length
+    return n
   }
 
+  // Legacy bar only: the pooled one replaced the anchor with the sections on
+  // either side of the centre.
   function centerAnchorOf(screen) {
     var key = String(screen || "")
     if (key !== "" && hasProfile(key)) {
@@ -266,7 +288,9 @@ Panel {
   }
 
   function emptyLayout() {
-    return { left: [], center: [], right: [] }
+    var out = {}
+    for (var s = 0; s < sections.length; s++) out[sections[s]] = []
+    return out
   }
 
   function ensureBarShape(config) {
@@ -278,7 +302,7 @@ Panel {
   }
 
   // The section array a write should land in: a screen's own when it has a
-  // profile, the default otherwise. Same rule as Bar.qml's rawLayoutSection(),
+  // profile, the default otherwise. Same rule as Bar.qml's profileConfig(),
   // so the panel and a drag can never disagree about where an edit goes.
   function sectionArray(config, section, screen) {
     ensureBarShape(config)
@@ -308,7 +332,7 @@ Panel {
       for (var s = 0; s < root.sections.length; s++)
         if (!(seeded[root.sections[s]] instanceof Array)) seeded[root.sections[s]] = []
       var profile = { layout: seeded }
-      if (config.bar.centerAnchor !== undefined && config.bar.centerAnchor !== null)
+      if (root.legacy && config.bar.centerAnchor !== undefined && config.bar.centerAnchor !== null)
         profile.centerAnchor = String(config.bar.centerAnchor)
       config.bar.screens[key] = profile
     })
@@ -649,13 +673,33 @@ Panel {
     })
   }
 
+  // opaque, glassy or none. A config from before `background` says
+  // `transparent` instead, read the way upstream reads it.
+  readonly property string backgroundLook: {
+    var look = String(barConfig.background || "")
+    if (look !== "") return look
+    return barConfig.transparent === true ? "none" : "opaque"
+  }
+
+  // Written to shell.json rather than through `omarchy-bar background`: the
+  // bar syncs Hyprland's blur itself whenever the look it reads changes.
+  function setBackground(value) {
+    mutate(function(config) {
+      ensureBarShape(config)
+      config.bar.background = String(value)
+      delete config.bar.transparent
+      // Pills keep the strip clear whatever this says, so changing it while
+      // they are on would change nothing on screen. Leave pills instead: the
+      // choice then lands on the look it names.
+      if (config.bar.pills === true) config.bar.pills = false
+    })
+  }
+
+  // The legacy bar's switch: it reads `transparent` and knows no `background`.
   function setTransparent(value) {
     mutate(function(config) {
       ensureBarShape(config)
       config.bar.transparent = value === true
-      // Pills keep the strip clear whatever this says, so flipping it while
-      // they are on would change nothing on screen. Leave pills instead: the
-      // switch then lands on the look it names.
       if (config.bar.pills === true) config.bar.pills = false
     })
   }
@@ -713,14 +757,38 @@ Panel {
     return out
   }
 
-  // Reorders go through the bar so the panel and a drag gesture stay one code
-  // path. screenName is what routes the write to the right profile.
+  // Moves the first entry with this id to before `beforeId`, or to the end of
+  // the section when that is empty or not there. The bar matches a written
+  // layout to the widgets it already has by entry (BarModel.layoutWidgets), so
+  // a widget moved here keeps its instance just as one dragged on the bar does.
+  //
+  // The legacy bar still takes a move through its own dropBarModule(), the
+  // call its drag makes, which was always this panel's way in.
   function moveTo(id, fromSection, toSection, beforeId, screen) {
-    if (!bar || typeof bar.dropBarModule !== "function") return
-    bar.dropBarModule(
-      { region: String(fromSection), moduleName: String(id), screenName: String(screen || "") },
-      String(toSection),
-      String(beforeId || ""))
+    if (legacy) {
+      bar.dropBarModule(
+        { region: String(fromSection), moduleName: String(id), screenName: String(screen || "") },
+        String(toSection),
+        String(beforeId || ""))
+      return
+    }
+    var key = String(id)
+    var before = String(beforeId || "")
+    mutate(function(config) {
+      var from = root.sectionArray(config, String(fromSection), screen)
+      var at = -1
+      for (var i = 0; i < from.length; i++) {
+        if (from[i] && String(from[i].id) === key) { at = i; break }
+      }
+      if (at === -1) return
+      var entry = from.splice(at, 1)[0]
+      var into = root.sectionArray(config, String(toSection), screen)
+      var to = into.length
+      for (var j = 0; before !== "" && j < into.length; j++) {
+        if (into[j] && String(into[j].id) === before) { to = j; break }
+      }
+      into.splice(to, 0, entry)
+    })
   }
 
   function moveUp(section, index, screen) {
@@ -926,12 +994,30 @@ Panel {
 
           Toggle {
             width: parent.width
+            visible: root.legacy
             label: "Transparent bar"
             description: root.barConfig.pills === true ? "Switches pills off" : "Applies to every screen"
             checked: root.barConfig.transparent === true
             foreground: root.foreground
             fontFamily: root.fontFamily
             onClicked: root.setTransparent(!(root.barConfig.transparent === true))
+          }
+
+          ButtonGroup {
+            width: parent.width
+            visible: !root.legacy
+            options: [
+              { value: "opaque", label: "Opaque" },
+              { value: "glassy", label: "Glassy" },
+              { value: "none", label: "Clear" }
+            ]
+            // Pills paint the strip clear whatever the background is, so no
+            // choice is lit while they are on; picking one switches them off.
+            value: root.barConfig.pills === true ? "" : root.backgroundLook
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            onChanged: function(v) { root.setBackground(v) }
           }
 
           Toggle {
@@ -1020,6 +1106,7 @@ Panel {
 
           Dropdown {
             width: parent.width
+            visible: root.legacy
             label: "Center anchor"
             options: {
               var out = [{ value: "none", label: "No anchor (center as a group)" }]
@@ -1179,11 +1266,20 @@ Panel {
 
               ButtonGroup {
                 width: parent.width
-                options: [
-                  { value: "left", label: "Left" },
-                  { value: "center", label: "Center" },
-                  { value: "right", label: "Right" }
-                ]
+                options: root.legacy
+                  ? [
+                      { value: "left", label: "Left" },
+                      { value: "center", label: "Center" },
+                      { value: "right", label: "Right" }
+                    ]
+                  : [
+                      { value: "left", label: "Left" },
+                      { value: "centerBegin", label: "◂ Ctr" },
+                      { value: "center", label: "Center" },
+                      { value: "centerEnd", label: "Ctr ▸" },
+                      { value: "right", label: "Right" },
+                      { value: "tray", label: "Tray" }
+                    ]
                 value: root.addSection
                 foreground: root.foreground
                 fontFamily: root.fontFamily

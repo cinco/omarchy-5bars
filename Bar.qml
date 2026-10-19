@@ -14,7 +14,10 @@ import Quickshell.Io
 //
 // So nothing is copied. At startup this reads the `Bar.qml` of the *installed*
 // package, applies the edit table in `edits.json`, compiles the result in
-// memory, and instantiates that. The base is whatever version is on the
+// memory, and instantiates that. Two tables ship: `edits.json` for the pooled
+// bar (Omarchy r7083 on), `edits-legacy.json` for the one before it, which is
+// what the stable 4.0.x releases still carry. The first whose anchors all
+// match is the one used. The base is whatever version is on the
 // machine, so upstream fixes arrive on their own. When an edit no longer
 // matches — upstream moved the ground under an anchor — nothing is guessed:
 // the user gets the stock bar of their own version plus a notification saying
@@ -44,6 +47,7 @@ Item {
   property var inner: null
   property string mode: "starting"     // starting | patched | stock | failed
   property string failure: ""
+  property string edition: ""          // pooled | legacy, once patched
   property bool fellBack: false        // the stock bar is a one-shot; see fallback()
 
   // ── compiling ──────────────────────────────────────────────────────────
@@ -94,9 +98,9 @@ Item {
     }
   }
 
-  function applyEdits(source) {
+  function applyEdits(source, tableText) {
     var text = source
-    var table = JSON.parse(editsFile.text())
+    var table = JSON.parse(tableText)
     for (var i = 0; i < table.length; i++) {
       var edit = table[i]
       var seen = text.split(edit.old).length - 1
@@ -112,13 +116,27 @@ Item {
     var source = upstreamBar.text()
     if (!source || source.length === 0) { fallback("could not read " + upstreamDir + "/Bar.qml"); return }
 
+    // The pooled table first: it is the bar Omarchy is moving to. The legacy
+    // one covers the releases that still ship the bar before it, so one 5bars
+    // serves both channels until stable catches up.
     var patched
-    try {
-      patched = applyEdits(source)
-    } catch (e) {
-      // An anchor moved. This is the expected way to fail after an Omarchy
-      // update, and it must not take the user's bar with it.
-      fallback(String(e.message || e))
+    var misses = []
+    var tables = [
+      { edition: "pooled", file: editsFile },
+      { edition: "legacy", file: legacyEditsFile }
+    ]
+    for (var t = 0; t < tables.length && patched === undefined; t++) {
+      try {
+        patched = applyEdits(source, tables[t].file.text())
+        edition = tables[t].edition
+      } catch (e) {
+        misses.push(tables[t].edition + ": " + String(e.message || e))
+      }
+    }
+    if (patched === undefined) {
+      // An anchor moved in both. This is the expected way to fail after an
+      // Omarchy update, and it must not take the user's bar with it.
+      fallback(misses.join("; "))
       return
     }
 
@@ -129,7 +147,7 @@ Item {
       fallback(String(e.message || e))
       return
     }
-    console.log("5bars: built the patched bar in memory")
+    console.log("5bars: built the patched bar in memory (" + edition + " edits)")
     patchedLoader.sourceComponent = component
     var created = patchedLoader.item
     if (!created) {
@@ -300,14 +318,18 @@ Item {
 
   // ── the host surface ───────────────────────────────────────────────────
   // Exactly what shell.qml touches on `shell.bar`, forwarded to the real bar:
-  // the four scalars behind the per-plugin bar-state API (shell.qml:447-450),
-  // the three bar-widget panel calls behind summon/hide/isOpen (:1169, :1196,
-  // :1212), transparency (:1613), and the two diagnostics/hotkey entry points
-  // (:1712, :1732). `barConfig` is already a wrapper property, forwarded by
+  // the five values behind the per-plugin bar-state API (shell.qml:461-465),
+  // the three bar-widget panel calls behind summon/hide/isOpen, the background
+  // cycle behind toggleBarTransparency (:1801; a legacy host calls
+  // toggleTransparency there instead), and the two diagnostics/hotkey entry
+  // points. `barConfig` is already a wrapper property, forwarded by
   // onBarConfigChanged. Anything added to that list upstream lands here as a
   // dead host read, not a crash — which is why status() reports the facade.
+  // `grep -o 'shell\.bar\.[a-zA-Z]*' shell.qml | sort -u` is the list to hold
+  // this against after an update.
   readonly property bool barHidden: inner ? inner.barHidden === true : false
   readonly property int barSize: inner ? (inner.barSize || 0) : 0
+  readonly property var screenBarSizes: inner && inner.screenBarSizes ? inner.screenBarSizes : ({})
   readonly property string fontFamily: inner ? String(inner.fontFamily || "") : ""
   readonly property string position: inner ? String(inner.position || "top") : "top"
 
@@ -323,6 +345,10 @@ Item {
     return !!inner && typeof inner.isBarWidgetOpen === "function" && inner.isBarWidgetOpen(id)
   }
 
+  function cycleBackground() {
+    if (inner && typeof inner.cycleBackground === "function") inner.cycleBackground()
+  }
+
   function toggleTransparency() {
     if (inner && typeof inner.toggleTransparency === "function") inner.toggleTransparency()
   }
@@ -336,14 +362,15 @@ Item {
       ? inner.panelWidgetIdAt(region, index) : ""
   }
 
-  // Three things have to arrive before the bar can be built, and they arrive
+  // Four things have to arrive before the bar can be built, and they arrive
   // independently: the host injects the registry after loading this component,
-  // and the two FileViews load asynchronously. Waiting on all of them is the
+  // and the three FileViews load asynchronously. Waiting on all of them is the
   // whole point — the first version built as soon as the registry landed, read
   // an empty file, and fell back to the stock bar for no reason.
-  readonly property bool sourcesReady: upstreamRead && editsRead && barWidgetRegistry !== null
+  readonly property bool sourcesReady: upstreamRead && editsRead && legacyEditsRead && barWidgetRegistry !== null
   property bool upstreamRead: false
   property bool editsRead: false
+  property bool legacyEditsRead: false
 
   onSourcesReadyChanged: if (sourcesReady && mode === "starting") { healRegistry(); build() }
 
@@ -413,8 +440,9 @@ Item {
     onLoadFailed: function(error) { root.fallback("could not read " + path + ": " + FileViewError.toString(error)) }
   }
 
-  // The edit table, read rather than imported: one file is the source of truth
-  // for both this and the offline checker in dev/, so they cannot drift.
+  // The edit tables, read rather than imported: the same files are the source
+  // of truth for both this and the offline checker in dev/, so they cannot
+  // drift.
   FileView {
     id: editsFile
     path: Qt.resolvedUrl("edits.json").toString().replace("file://", "")
@@ -422,6 +450,15 @@ Item {
     printErrors: true
     onLoaded: root.editsRead = true
     onLoadFailed: function(error) { root.fallback("could not read edits.json: " + FileViewError.toString(error)) }
+  }
+
+  FileView {
+    id: legacyEditsFile
+    path: Qt.resolvedUrl("edits-legacy.json").toString().replace("file://", "")
+    preload: true
+    printErrors: true
+    onLoaded: root.legacyEditsRead = true
+    onLoadFailed: function(error) { root.fallback("could not read edits-legacy.json: " + FileViewError.toString(error)) }
   }
 
   Process { id: notify }
@@ -434,6 +471,7 @@ Item {
     function status(): string {
       return JSON.stringify({
         mode: root.mode,
+        edition: root.edition,
         failure: root.failure,
         upstream: root.upstreamDir,
         // On 4.0.3 this is true against the facade's own `bar` slot while the
